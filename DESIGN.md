@@ -274,6 +274,8 @@ This avoids distortion caused by directly feeding `q` and `r` into Cartesian noi
 
 ## 8. Coordinate-Based Randomness
 
+Do not use math/rand - use only math/rand/v2.
+
 WGVA should not use a mutable PRNG stream as the basis of terrain generation.
 
 Avoid:
@@ -698,16 +700,7 @@ Some terrain decisions require knowing whether the location is flat, hilly, or s
 
 Slope can be estimated by sampling elevation at the six neighboring hexes.
 
-Axial neighbors:
-
-```text
-(+1,  0)
-(+1, -1)
-( 0, -1)
-(-1,  0)
-(-1, +1)
-( 0, +1)
-```
+See Directions in Appendix A for Axial neighbors.
 
 For example:
 
@@ -1407,3 +1400,20 @@ The first major WGVA milestone is successful when all of the following are true:
 - Generating a distant tile does not require generating the intervening world.
 
 At that point WGVA will retain the operational simplicity of the original Marajanda coordinate-path generator while producing terrain with the visual coherence of a modern noise-based map.
+
+---
+
+## Appendix A
+
+### Direction Vectors
+
+Direction is an integer in the range of 0..5. Wraps as `dir % 6` for positive numbers. Direction -1 would be the same as 5; -2 would be equivalent to 4.
+
+| Direction | Cube Vector  | Axial Vector |
+| --------- | ------------ | ------------ |
+|         0 | (+1,  0, -1) | (+1,  0)     |
+|         1 | (+1, -1,  0) | (+1, -1)     |
+|         2 | ( 0, -1, +1) | ( 0, -1)     |
+|         3 | (-1,  0, +1) | (-1,  0)     |
+|         4 | (-1, +1,  0) | (-1, +1)     |
+|         5 | ( 0, +1, -1) | ( 0, +1)     |
