@@ -3,6 +3,7 @@
 **Module:** `github.com/mdhender/wgva`  
 **Target language:** Go  
 **Coordinate system:** axial hex coordinates `(q, r)`  
+**Hex scale:** 3-mile apothem
 **World origin:** `(0, 0)`  
 **Primary goal:** Generate attractive, geographically coherent terrain on demand without requiring a finite map boundary.
 
@@ -230,16 +231,29 @@ should be sufficient for callers.
 
 WGVA uses axial hex coordinates `(q, r)`.
 
+Axial coordinates define tile identity and adjacency, not how hexes must be drawn. Flat-top versus pointy-top orientation is a rendering and layout choice for images presented to players; it is not part of the generator's public model. A renderer may choose either orientation without changing generated tile data.
+
 Noise functions usually operate on Cartesian coordinates, so axial coordinates should be converted to continuous 2D world space before sampling.
 
-For pointy-top hexes of unit size:
+Each regular hex has a 3-mile apothem. Therefore:
 
 ```text
-x = sqrt(3) * (q + r/2)
-y = 3/2 * r
+neighboring center distance = 6 miles
+flat-to-flat width          = 6 miles
+point-to-point width        = 4 * sqrt(3) miles, approximately 6.93 miles
+area                        = 18 * sqrt(3) square miles, approximately 31.18 square miles
 ```
 
-Equivalent scaled formulas are acceptable.
+Canonical world-space coordinates should be measured in miles.
+
+The generator may use whichever internal orientation makes the implementation simplest. For example, one convenient pointy-top embedding is:
+
+```text
+x = 6 * (q + r/2)
+y = 3 * sqrt(3) * r
+```
+
+This places the centers of all adjacent hexes exactly 6 miles apart. Any equivalent embedding is acceptable if it preserves that distance and uses miles as its world-space unit. The chosen embedding is an internal implementation detail, although it must remain stable wherever deterministic compatibility is promised.
 
 The generator should centralize this conversion:
 
@@ -255,8 +269,6 @@ func AxialToWorld(c Coord) Vec2
 All continuous fields should sample from the same canonical world-space coordinate system.
 
 This avoids distortion caused by directly feeding `q` and `r` into Cartesian noise.
-
-The exact hex orientation is an implementation choice, but it must be documented and stable.
 
 ---
 
@@ -363,15 +375,15 @@ elevation =
   + fine_detail
 ```
 
-A practical initial implementation might use approximate wavelengths measured in hexes:
+A practical initial implementation might use the following approximate wavelengths. One hex of wavelength means 6 miles of center-to-center distance; it does not refer to edge length, point-to-point width, or area.
 
-| Field | Approximate wavelength |
-|---|---:|
-| Continentalness | 2,000–8,000 hexes |
-| Macro uplift | 800–2,000 hexes |
-| Regional relief | 200–600 hexes |
-| Hills | 40–150 hexes |
-| Local detail | 5–30 hexes |
+| Field | Approximate wavelength | Approximate distance |
+|---|---:|---:|
+| Continentalness | 500–2,000 hexes | 3,000–12,000 miles |
+| Macro uplift | 150–600 hexes | 900–3,600 miles |
+| Regional relief | 40–200 hexes | 240–1,200 miles |
+| Hills | 8–40 hexes | 48–240 miles |
+| Local detail | 3–12 hexes | 18–72 miles |
 
 These are starting values, not requirements.
 
@@ -395,13 +407,15 @@ macro region
                     +-- tile
 ```
 
-Example sizes:
+Example sizes at the established 3-mile apothem:
 
-```text
-macro region: 4096 hexes
-region:        512 hexes
-chunk:          64 hexes
-```
+| Level | Axial interval | Physical interval |
+|---|---:|---:|
+| Macro region | 512 hexes | 3,072 miles |
+| Region | 128 hexes | 768 miles |
+| Chunk | 32 hexes | 192 miles |
+
+The intervals describe the spacing between boundaries or anchors along either axial basis direction. Regions and chunks produced by independent division of `q` and `r` are parallelograms in world space, not regular hexagons with the listed physical interval as a diameter.
 
 These values may be tuned.
 
@@ -850,7 +864,7 @@ Chunks are useful for callers and caches but should not define geography.
 Recommended starting size:
 
 ```text
-64 x 64 axial-addressed cells
+32 x 32 axial-addressed cells
 ```
 
 The exact geometric interpretation of an axial chunk must be defined carefully.
@@ -864,16 +878,16 @@ chunkR := floorDiv(r, ChunkSize)
 
 Use mathematical floor division, not Go integer truncation, because coordinates can be negative.
 
-For example with chunk size `64`:
+For example with chunk size `32`:
 
 ```text
 q =   0 -> chunk  0
-q =  63 -> chunk  0
-q =  64 -> chunk  1
+q =  31 -> chunk  0
+q =  32 -> chunk  1
 
 q =  -1 -> chunk -1
-q = -64 -> chunk -1
-q = -65 -> chunk -2
+q = -32 -> chunk -1
+q = -33 -> chunk -2
 ```
 
 Implement and test this explicitly.
