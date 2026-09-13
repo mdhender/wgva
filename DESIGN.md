@@ -1,11 +1,11 @@
-# WGVA — Unbounded Procedural World Generator Design
+# WGVA — Effectively Unbounded Procedural World Generator Design
 
 **Module:** `github.com/mdhender/wgva`  
 **Target language:** Go  
 **Coordinate system:** axial hex coordinates `(q, r)`  
 **Hex scale:** 3-mile apothem
 **World origin:** `(0, 0)`  
-**Primary goal:** Generate attractive, geographically coherent terrain on demand without requiring a finite map boundary.
+**Primary goal:** Generate attractive, geographically coherent terrain on demand without exposing a practical map boundary.
 
 ---
 
@@ -30,9 +30,7 @@ Unlike a naive coordinate-hash generator, however, adjacent tiles must participa
 - forests, plains, deserts, marshes, and other terrain,
 - region-scale geographic variation that crosses chunk boundaries naturally.
 
-The implementation should avoid a fixed rectangular or circular world boundary.
-
-The world is therefore **unbounded in address space**, while its large-scale geography is generated from deterministic continuous fields and hierarchical regions.
+The implementation uses a finite but enormous wrapped hexagonal address space. This is described as “unbounded” to players because normal play should never encounter a terminal edge. Its large-scale geography is generated from deterministic continuous fields and hierarchical regions.
 
 ---
 
@@ -50,11 +48,11 @@ Generate(seed, q, r) == Generate(seed, q, r)
 
 Generation order must not affect results.
 
-### 2.2 Unbounded
+### 2.2 Effectively unbounded and wrapped
 
 No API should require world width, height, radius, or bounding rectangle.
 
-Any valid axial coordinate should be generatable, subject only to integer limits.
+For the alpha generator, canonical coordinates form a hexagonal map with signed 16-bit cube components. Coordinate operations that leave that map wrap to the corresponding tile on the opposite edge using the scheme in section 7.1.
 
 ### 2.3 Local
 
@@ -110,22 +108,26 @@ The first implementation does **not** need to guarantee:
 
 Those may be layered onto the generator later.
 
-Because the world is unbounded, global statements such as "the world is exactly 58% land" are not meaningful. The generator may instead target statistical properties over sufficiently large samples.
+Although the address space is finite, it is far too large to generate or normalize globally. Statements such as "the world is exactly 58% land" are therefore not practical requirements. The generator may instead target statistical properties over sufficiently large samples.
 
 ---
 
 ## 4. Core Model
 
-A tile is uniquely identified by its axial coordinate.
+A tile is uniquely identified by its canonical axial coordinate. Non-canonical aliases are normalized before lookup.
 
 ```go
+type Component int16
+
 type Coord struct {
-    Q int64
-    R int64
+    Q Component
+    R Component
 }
 ```
 
-Use signed 64-bit coordinates unless there is a compelling implementation reason not to.
+Store alpha axial coordinates as signed 16-bit `Component` values. Calculate `s = -q-r`, mirror centers, differences, and other intermediate coordinate arithmetic with `int64`. Not every pair of signed 16-bit `q` and `r` values has an `s` in the signed 16-bit range; normalize such coordinates into the canonical wrapped map before generation, persistence, or comparison.
+
+Keep the component type and world-radius constant centralized. Expanding a later generator to `int32` should require changing those definitions and compatibility tests rather than rewriting algorithms or the database schema. The expansion still changes world topology and therefore requires a new generator version.
 
 The origin is:
 
@@ -141,14 +143,20 @@ The minimum public tile representation is:
 
 ```go
 type Tile struct {
-    Coord     Coord
+    Coord Coord
+
+    ElevationValue float64
+    HeatValue      float64
+    MoistureValue  float64
+    ReliefValue    float64
+
     Elevation Elevation
     Climate   Climate
     Terrain   Terrain
 }
 ```
 
-The exact underlying types may evolve, but elevation, climate, and terrain are required attributes.
+The physical values and their elevation, climate, and terrain classifications are part of the ordinary tile result. Games and renderers should not need a diagnostic API to recover them.
 
 The generator may also expose intermediate values for diagnostics.
 
@@ -158,12 +166,9 @@ Example:
 type Sample struct {
     Coord Coord
 
-    ElevationValue float64
-    MoistureValue  float64
-    HeatValue      float64
-
     Continentalness float64
-    Relief          float64
+    RegionalUplift  float64
+    BasinInfluence  float64
 
     Tile Tile
 }
@@ -206,15 +211,16 @@ Noise fields and region influences must extend across them.
 For a requested tile `(q, r)`:
 
 ```text
-1. Convert axial coordinate to continuous world-space position.
-2. Evaluate macro-scale fields.
-3. Determine hierarchical regional influences.
-4. Evaluate medium- and local-scale detail.
-5. Combine fields into normalized physical values.
-6. Classify elevation.
-7. Classify climate.
-8. Classify terrain.
-9. Return immutable tile data.
+1. Normalize the coordinate into the wrapped canonical map.
+2. Convert the canonical coordinate to continuous world-space position.
+3. Evaluate macro-scale fields.
+4. Determine hierarchical regional influences.
+5. Evaluate medium- and local-scale detail.
+6. Combine fields into normalized physical values.
+7. Classify elevation.
+8. Classify climate.
+9. Classify terrain.
+10. Return immutable tile data with its canonical coordinate.
 ```
 
 Conceptually:
@@ -269,6 +275,43 @@ func AxialToWorld(c Coord) Vec2
 All continuous fields should sample from the same canonical world-space coordinate system.
 
 This avoids distortion caused by directly feeding `q` and `r` into Cartesian noise.
+
+### 7.1 Wrapped coordinate domain
+
+For the alpha generator, let `N = math.MaxInt16`. The canonical map is the hexagonal cube-coordinate domain:
+
+```text
+-N <= q <= +N
+-N <= r <= +N
+-N <= s <= +N
+q + r + s = 0
+```
+
+Wrapping follows the hexagonal wraparound construction described by Red Blob Games. The six mirror centers are the rotations of:
+
+```text
+(2*N+1, -N, -N-1)
+```
+
+When an operation produces a coordinate outside the canonical map, translate it by the appropriate mirror center until it is canonical. The implementation must use arithmetic normalization rather than a precomputed mirror table because this map is too large to enumerate. Use `int64` for the mirror centers and all normalization intermediates, then convert the canonical `q` and `r` to `Component`.
+
+All public coordinate operations, neighbor sampling, persistence keys, region lookup, and rendering must use the same canonicalizer. Values that normalize to the same coordinate identify the same tile.
+
+WGVA should make a best effort to make continuous fields periodic under the mirror translations so terrain joins naturally across wrapped edges. Exact periodicity must not delay the first implementation. If a field cannot be made periodic without disproportionate complexity or loss of quality, the discontinuity is an accepted world-warp seam and must be documented and tested as such.
+
+Use `github.com/maloquacious/hexg` for hex directions, geometry, finite-area traversal, layouts, and polygon corners rather than implementing a competing hex library. Convert canonical `Component` values to `int` and then `hexg.Hex` through a centralized adapter. The alpha's `int16` values and derived cube component are losslessly representable by `int` on every Go target.
+
+### 7.2 World scale
+
+For a cube-coordinate hexagon of radius `N`, the number of tiles is:
+
+```text
+tiles = 1 + 3*N*(N+1)
+```
+
+With `N = math.MaxInt16`, the alpha world contains exactly `3,221,127,169` canonical tiles, approximately `3.2211e9`.
+
+At a 3-mile apothem, each tile covers `18*sqrt(3)`, approximately `31.1769`, square miles. The alpha's total surface area is therefore approximately `1.00425e11` square miles. The center-to-center radius is `196,602` miles, and the opposite-corner center span is `393,204` miles. This is approximately 510 Earth surface areas and is large enough to exercise edge wrapping during alpha testing while remaining effectively unbounded for gameplay.
 
 ---
 
@@ -589,7 +632,7 @@ elevation >  0 -> potential land
 
 Sea level may be configurable.
 
-Deterministic basin fields may classify some potential-land tiles as lakes or inland seas, as described in section 17. This must use bounded local sampling rather than global connectivity or flood fill.
+Deterministic basin fields may classify some potential-land tiles as lakes or inland seas if the coherence requirements in section 17 can be met. Otherwise, the first implementation retains basin geography without inland-water classification. Both approaches must use bounded local sampling rather than global connectivity or flood fill.
 
 If a target land fraction is desired, tune the distribution of the continentalness field and sea-level threshold statistically.
 
@@ -619,44 +662,46 @@ moisture =
   + local_variation
 ```
 
-Because an unbounded plane has no inherent equator, avoid assuming that `r == 0` represents a planetary equator unless that is an explicit world rule.
+Because the wrapped world has no inherent equator, avoid assuming that `r == 0` represents a planetary equator unless that is an explicit world rule.
 
 The first version should therefore use procedural broad heat zones rather than global latitude.
 
 If Marajanda later requires latitude, world topology can add it as a separate layer.
 
-### 16.1 Climate Type
+### 16.1 Climate classification
 
-A categorical climate can be derived from heat and moisture.
+Climate retains independent heat and moisture classifications. Do not use a single enum that mixes values such as cold, arid, and humid, because those properties are not mutually exclusive.
 
 Example:
 
 ```go
-type Climate uint8
+type HeatBand uint8
 
 const (
-    ClimatePolar Climate = iota
-    ClimateCold
-    ClimateTemperate
-    ClimateWarm
-    ClimateHot
-    ClimateArid
-    ClimateHumid
+    HeatPolar HeatBand = iota
+    HeatCold
+    HeatTemperate
+    HeatWarm
+    HeatHot
 )
-```
 
-This enumeration is illustrative only.
+type MoistureBand uint8
 
-A two-axis classification may be superior:
+const (
+    MoistureArid MoistureBand = iota
+    MoistureDry
+    MoistureModerate
+    MoistureHumid
+    MoistureSaturated
+)
 
-```go
 type Climate struct {
     Heat     HeatBand
     Moisture MoistureBand
 }
 ```
 
-The design should favor retaining information rather than prematurely compressing it into one enum.
+The exact bands and thresholds may be tuned, but the two-axis representation is part of the public model. `Tile` also retains the normalized heat and moisture values from which these bands were classified.
 
 ---
 
@@ -709,7 +754,9 @@ ocean and inland water
     -> climate-driven land cover
 ```
 
-Ocean water still comes from the primary elevation field and sea-level threshold. Lakes and inland seas require additional deterministic basin fields: lake basins at regional or local scales, and inland-sea basins at broader scales. The distinction is based on generated basin scale and depth, not a global connectivity search or flood fill. This preserves bounded, stateless tile generation. An inland sea may therefore be understood as a very large generated lake rather than water proven to be disconnected from every ocean in the unbounded world.
+Ocean water still comes from the primary elevation field and sea-level threshold. The first implementation should make a best effort to derive coherent depressions from deterministic basin fields at broad, regional, and local scales. Basin influence is useful even when no water is assigned: dry endorheic regions such as the Great Basin are valid geographic results.
+
+Classify a basin as a lake or inland sea only if bounded local generation can give neighboring water tiles coherent membership, surface elevation, depth, and shorelines. The distinction between lake and inland sea is then based on generated basin scale and depth, not global connectivity or flood fill. If those invariants cannot be achieved simply and deterministically, omit inland-water terrain from the first implementation rather than emitting inconsistent per-tile water. A generated inland sea is a very large basin lake, not water proven to be disconnected from every ocean in the entire wrapped world.
 
 Marsh and swamp should be distinguished primarily by climate and vegetation tendency: marshes favor open, saturated lowlands, while swamps favor warmer or forested saturated lowlands. Volcanoes should be rare products of regional volcanic tendency, uplift, and local peak structure rather than independent random tile assignments.
 
@@ -761,14 +808,20 @@ package wgva
 
 type Seed uint64
 
+type Component int16
+
 type Coord struct {
-    Q int64
-    R int64
+    Q Component
+    R Component
 }
 
 type Generator struct {
     // immutable configuration
 }
+
+func Normalize(q, r int64) Coord
+
+func (c Coord) Neighbor(direction int) Coord
 
 func New(seed Seed, opts ...Option) *Generator
 
@@ -776,6 +829,8 @@ func (g *Generator) Tile(c Coord) Tile
 
 func (g *Generator) ElevationAt(c Coord) float64
 ```
+
+`Normalize` is the entry point for unwrapped or intermediate coordinates and returns their canonical wrapped representative. Coordinate-producing operations such as `Neighbor` must normalize before returning. `Tile` also normalizes its input so a non-canonical `Coord` whose `q` and `r` fields are individually representable cannot create a second identity for the same tile.
 
 Optional:
 
@@ -832,18 +887,22 @@ type Config struct {
     WarpScale    float64
     WarpStrength float64
 
-    RegionSize int64
-    ChunkSize  int64
+    RegionSize int32
+    ChunkSize  int32
 }
 ```
 
-`New()` should validate configuration.
+Field names above are illustrative; the implemented configuration must include every weight, scale, threshold, and feature toggle that can alter generated output. Scale fields must document whether they are wavelengths or frequencies and which unit they use. Validation must reject non-finite floating-point values, non-positive sizes and scales, out-of-range normalized thresholds, and combinations that cannot be evaluated safely.
 
 Provide stable defaults.
 
 After a `Generator` is constructed, its configuration should not mutate.
 
 This makes concurrent use safe and deterministic.
+
+The complete effective configuration, including values supplied by defaults, is authoritative database data for the single world. A newly created database writes that complete configuration before gameplay; reopening never silently substitutes current program defaults for missing stored values.
+
+Each algorithm version must define a canonical serialization for its effective configuration. Compute a stable fingerprint, such as SHA-256 over the algorithm version and canonical configuration bytes, for cache identity and diagnostics. Do not derive the fingerprint from Go map iteration, textual debug output, or a serialization with unspecified field ordering.
 
 ---
 
@@ -974,8 +1033,8 @@ Suggested internal cache key:
 
 ```go
 type RegionCoord struct {
-    Q int64
-    R int64
+    Q int32
+    R int32
 }
 ```
 
@@ -996,7 +1055,7 @@ generator version
 + coordinates
 ```
 
-A saved game therefore needs to know which generation rules produced its world.
+A WGVA database contains exactly one world and must contain everything needed to reproduce that world's generated baseline.
 
 WGVA should expose a generator algorithm version.
 
@@ -1006,17 +1065,43 @@ Example:
 const AlgorithmVersion = 1
 ```
 
-Applications should persist:
+The database must persist in singleton world metadata:
 
 ```text
 world seed
 algorithm version
-relevant generator configuration
+complete effective generator configuration
+configuration fingerprint
 ```
 
 Changing noise formulas, thresholds, or hash domains can change existing worlds.
 
 Treat such changes as generation-version changes unless compatibility is intentionally preserved.
+
+Use `zombiezen.com/go/sqlite` for SQLite access and `zombiezen.com/go/sqlite/sqlitemigration` for ordered schema migrations. Do not use a `database/sql` SQLite driver. Every database uses:
+
+```go
+const databaseApplicationID int32 = 0x57475641 // ASCII "WGVA"
+```
+
+Set this through `sqlitemigration.Schema.AppID`. The binary must reject a non-empty database whose `PRAGMA application_id` does not equal this value before applying migrations or performing application writes.
+
+`sqlitemigration` owns `PRAGMA user_version` as the schema migration version. SQLite does not provide application-defined pragmas, so store the generator algorithm version in the singleton world metadata rather than attempting `PRAGMA generator_version`.
+
+Database opening has explicit compatibility gates:
+
+```text
+1. Verify PRAGMA application_id is WGVA.
+2. Read PRAGMA user_version and reject schemas newer than the binary.
+3. Apply supported ordered schema migrations.
+4. Read and validate the singleton world metadata and complete configuration.
+5. Reject a generator version the binary cannot reproduce.
+6. Permit normal reads and writes.
+```
+
+Older generator versions are rejected unless the binary deliberately retains their implementations. A generator incompatibility must never be handled by silently regenerating the world with current rules.
+
+Persist mutable game and player state as sparse overlays keyed by canonical `(q, r)` coordinates. No `world_id` is needed because one database contains one world. Generated tiles, chunks, and PNGs are reproducible caches rather than authoritative records and may be discarded. Cache entries must carry or be invalidated against the configuration fingerprint and any relevant rendering/palette version.
 
 ---
 
@@ -1065,20 +1150,25 @@ Create a command such as:
 cmd/wgva-map
 ```
 
-It should generate a bounded image of an arbitrary window into the otherwise unbounded world.
+It should generate a bounded image of an arbitrary window into the effectively unbounded wrapped world.
 
 Example:
 
 ```bash
 wgva-map \
-    -seed 12345 \
+    -db world.wgva \
     -q -200 \
     -r -150 \
-    -width 400 \
-    -height 300 \
+    -cols 400 \
+    -rows 300 \
+    -hex-radius 8 \
     -layer terrain \
     -out map.png
 ```
+
+The database supplies the seed, generator version, and effective configuration. If this command supports creating a new database, creation must write all of those values before rendering; it must not override them when opening an existing database. `cols` and `rows` are tile counts, while `hex-radius` is a pixel dimension.
+
+During phases before persistence exists, the same rendering code may be driven by an explicitly constructed in-memory generator as a development harness. Such output is diagnostic and does not represent a saved world. Player-facing rendering must always load its effective configuration from the database.
 
 Useful layers:
 
@@ -1095,7 +1185,7 @@ region influence
 
 This tool is essential for tuning procedural generation.
 
-The renderer is bounded; the world generator is not.
+The renderer is bounded; generation does not require callers to choose or approach the world's enormous radius.
 
 ---
 
@@ -1133,6 +1223,8 @@ Test coordinates around:
 (63, 63)
 (64, 64)
 ```
+
+Also test canonical coordinates and operations near all six wrapped edges. Use `int64` inputs that cross each edge and corner, and verify normalization, neighbor reciprocity, alias identity, and safe intermediate arithmetic.
 
 ### 30.5 Region Boundary Continuity
 
@@ -1178,6 +1270,14 @@ Golden tests detect accidental world changes.
 
 Changing them should be an explicit generation-version decision.
 
+### 30.10 Wrapped-edge continuity
+
+Compare physical fields on corresponding tiles at all six wrapped edge pairs. Prefer the same continuity expectations used for ordinary neighbors. If exact periodicity is not implemented for a field, record the known warp seam explicitly rather than weakening unrelated continuity tests.
+
+### 30.11 Database compatibility
+
+Verify that opening rejects a non-WGVA application ID, a schema newer than the binary, an unsupported generator version, malformed or incomplete singleton metadata, and an invalid configuration without applying application writes. Verify that supported older schemas migrate in order and retain the same single-world metadata.
+
 ---
 
 ## 31. Performance Expectations
@@ -1210,6 +1310,8 @@ Measure before adding caches or complexity.
 Implement:
 
 - `Coord`
+- arithmetic wraparound normalization
+- checked `hexg` conversion
 - axial-to-world conversion
 - floor division helpers
 - deterministic domain-separated hashing
@@ -1217,22 +1319,35 @@ Implement:
 
 Exit condition:
 
-> Coordinate math and deterministic hashing have complete unit tests.
+> Coordinate math, six-edge wrapping, `hexg` conversion, configuration validation, and deterministic hashing have complete unit tests.
 
-### Phase 2 — Continuous scalar fields
+### Phase 2 — Continuous scalar fields and diagnostic renderer
 
 Implement:
 
 - one stable 2D noise source,
 - octave/fractal composition,
 - domain warping,
-- diagnostic scalar sampling.
+- diagnostic scalar sampling,
+- an initial `cmd/wgva-map` capable of rendering scalar layers.
 
 Exit condition:
 
-> Arbitrary coordinates can be sampled with no seams or bounds.
+> Arbitrary canonical coordinates can be sampled and inspected visually. Ordinary field sampling has no seams; wrapped-edge continuity is implemented on a best-effort basis and any remaining warp seam is documented.
 
-### Phase 3 — Elevation
+### Phase 3 — Hierarchical region influence
+
+Implement:
+
+- deterministic region parameters,
+- interpolation/blending across regional anchors,
+- regional roughness, climate, basin, and elevation biases.
+
+Exit condition:
+
+> Different large areas have distinct geographic character, with no visible implementation-region boundaries.
+
+### Phase 4 — Elevation
 
 Implement:
 
@@ -1246,18 +1361,6 @@ Implement:
 Exit condition:
 
 > Diagnostic elevation maps show coherent oceans, coastlines, lowlands, and uplands across multiple windows.
-
-### Phase 4 — Hierarchical region influence
-
-Implement:
-
-- deterministic region parameters,
-- interpolation/blending across regional anchors,
-- regional roughness and elevation biases.
-
-Exit condition:
-
-> Different large areas have distinct geographic character, with no visible region boundaries.
 
 ### Phase 5 — Climate
 
@@ -1273,23 +1376,33 @@ Exit condition:
 
 > Climate maps form coherent broad zones rather than tile-level speckle.
 
-### Phase 6 — Terrain
+### Phase 6 — Basins and terrain
 
-Implement terrain classification from physical fields.
+Implement:
 
-Exit condition:
-
-> Terrain maps visually correspond to elevation and climate, and boundaries appear geographically plausible.
-
-### Phase 7 — Renderer and tuning
-
-Add `cmd/wgva-map`.
-
-Tune frequencies, weights, thresholds, and warp strengths.
+- broad, regional, and local basin influence,
+- coherent inland water if it satisfies the invariants in section 17,
+- terrain classification from physical fields,
+- terrain layers in the diagnostic renderer.
 
 Exit condition:
 
-> Multiple seeds and distant coordinate windows produce varied but coherent maps.
+> Terrain maps visually correspond to elevation and climate, and boundaries appear geographically plausible. Basin geography exists; inland water is either coherent or deliberately omitted.
+
+### Phase 7 — Persistence, player rendering, and tuning
+
+Implement:
+
+- the single-world ZombieZen SQLite database,
+- ordered schema migrations and all compatibility gates,
+- canonical configuration persistence and fingerprinting,
+- player-facing terrain and overlay PNG composition.
+
+Tune frequencies, weights, thresholds, and warp strengths using the renderer throughout the preceding phases, then settle the defaults stored for the first algorithm version.
+
+Exit condition:
+
+> A database can create, reopen, and reproduce one world safely. Multiple seeds and distant coordinate windows produce varied but coherent maps and player PNGs.
 
 ---
 
@@ -1369,18 +1482,9 @@ Macro regions can provide deterministic identities for:
 
 Names should be a separate layer from physical generation.
 
-### 34.5 World topology
+### 34.5 Alternative world topology
 
-The current design describes an infinite plane.
-
-If later desired, another world implementation could map axial coordinates onto:
-
-- a cylinder,
-- torus,
-- sphere-like topology,
-- finite wrapped world.
-
-The tile classification pipeline should be kept sufficiently modular that topology and geography remain separable concepts.
+The current design uses the finite hexagonal wraparound topology in section 7.1. Another generator version could introduce a cylinder, torus, sphere-like topology, or a differently sized wrapped world. Coordinate normalization must remain a distinct layer from physical fields and classification so such a change is possible, but topology is an algorithm compatibility decision and cannot change for an existing world.
 
 ---
 
@@ -1412,13 +1516,14 @@ with no dependency on generation order or previously generated tiles.
 The first major WGVA milestone is successful when all of the following are true:
 
 - A caller can request any axial coordinate `(q, r)`.
-- No finite world dimensions are configured.
-- The returned tile contains elevation, climate, and terrain.
+- The fixed wrapped boundary is not encountered as a terminal gameplay edge.
+- The returned tile contains normalized elevation, heat, moisture, and relief values plus elevation, climate, and terrain classifications.
 - The same seed and coordinate always return the same tile.
 - Adjacent tiles form visually coherent geographic features.
 - Large-scale terrain differs across distant portions of the map.
 - Region and chunk boundaries cannot be identified by looking at generated terrain.
 - Negative coordinates work correctly.
+- All six world edges wrap correctly; any best-effort geographic discontinuity is documented as a world-warp seam.
 - The world can be rendered in arbitrary windows for inspection.
 - Generating a distant tile does not require generating the intervening world.
 
