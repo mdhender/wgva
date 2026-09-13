@@ -1,0 +1,11 @@
+*~
+*.out
+*.swp
+*.test
+*.tgz
+
+# editor and agent files
+.amp/
+.claude/
+.idea/
+*-prompt*.md
