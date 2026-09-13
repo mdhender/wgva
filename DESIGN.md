@@ -1407,7 +1407,30 @@ At that point WGVA will retain the operational simplicity of the original Maraja
 
 ### Direction Vectors
 
-Direction is an integer in the range of 0..5. Wraps as `dir % 6` for positive numbers. Direction -1 would be the same as 5; -2 would be equivalent to 4.
+The six canonical directions are numbered `0` through `5`. Increasing the direction by one moves clockwise to the next neighbor; decreasing it by one moves counter-clockwise. This cyclic ordering is independent of whether a renderer draws flat-top or pointy-top hexes.
+
+Callers may supply any integer direction. Normalize it to the range `[0, 5]` before using it as an index. In Go, `%` computes a remainder with the same sign as the dividend, so `-7 % 6` is `-1`, not `5`. A negative remainder therefore requires adjustment:
+
+```go
+func normalizeDirection(dir int) int {
+    dir %= 6
+    if dir < 0 {
+        dir += 6
+    }
+    return dir
+}
+```
+
+Values that differ by a multiple of six identify the same direction. For example:
+
+| Input | Normalized | Movement from direction 0 |
+|---:|---:|---|
+| `7` | `1` | One step clockwise |
+| `6` | `0` | Full turn clockwise |
+| `-1` | `5` | One step counter-clockwise |
+| `-2` | `4` | Two steps counter-clockwise |
+| `-6` | `0` | Full turn counter-clockwise |
+| `-7` | `5` | Full turn plus one step counter-clockwise |
 
 | Direction | Cube Vector  | Axial Vector |
 | --------- | ------------ | ------------ |
