@@ -578,16 +578,18 @@ The exact names are game-facing decisions and should not constrain the internal 
 
 ## 15. Water and Land
 
-Land-versus-water should be determined by comparing elevation against a fixed sea-level threshold.
+Land-versus-ocean water should be determined by comparing elevation against a fixed sea-level threshold.
 
 Example:
 
 ```text
-elevation <= 0 -> water
-elevation >  0 -> land
+elevation <= 0 -> ocean water
+elevation >  0 -> potential land
 ```
 
 Sea level may be configurable.
+
+Deterministic basin fields may classify some potential-land tiles as lakes or inland seas, as described in section 17. This must use bounded local sampling rather than global connectivity or flood fill.
 
 If a target land fraction is desired, tune the distribution of the continentalness field and sea-level threshold statistically.
 
@@ -672,23 +674,44 @@ terrain = f(
     slope-or-relief,
     temperature,
     moisture,
+    inland-water influence,
+    volcanic tendency,
     regional character,
     local variation,
 )
 ```
 
-Examples:
+The initial terrain vocabulary should be broad enough to produce a varied fantasy map without requiring every distinction to be implemented at once:
+
+| Family | Suggested terrain types | Typical evidence |
+|---|---|---|
+| Ocean | deep ocean, ocean, shallow sea, coastal water | Elevation below sea level, depth, and adjacency to land |
+| Inland water | inland sea, lake | Deterministic basin fields, basin scale, depth, and low local relief |
+| Frozen | glacial ice, tundra | Low temperature, with elevation and moisture distinguishing persistent ice from tundra |
+| Wetland | marsh, swamp, bog | Saturated moisture, low elevation, low relief, and temperature |
+| Dry | desert, badlands, scrubland | Low moisture, heat, exposed relief, and regional character |
+| Open land | plains, grassland, steppe, savanna | Moderate moisture and temperature, with regional variation |
+| Forest | boreal forest, temperate forest, tropical rainforest or jungle | Sufficient moisture combined with the appropriate heat band |
+| Elevated | hills, mountain, alpine terrain | Elevation, relief, slope, and temperature |
+| Volcanic | volcano, volcanic highland | Strong volcanic tendency combined with uplift and concentrated relief |
+| Coastal land | coast | Land near sea level with an adjacent ocean-water tile |
+
+These are primary game-facing classifications. Elevation, relief, and climate should remain available so a game can render combinations such as forested hills, glaciated mountains, or a volcanic island without requiring a distinct terrain constant for every combination.
+
+Classification rules should be ordered so exceptional terrain is not hidden by a broad biome rule. A reasonable precedence is:
 
 ```text
-water + deep elevation                  -> deep ocean
-water + near sea level                  -> coastal water
-land + high elevation                   -> mountain
-land + cold + moderate moisture         -> tundra
-land + hot + dry                        -> desert
-land + temperate + wet                  -> forest
-land + moderate moisture                -> grassland
-low elevation + very wet                -> marsh
+ocean and inland water
+    -> glacial ice
+    -> volcano
+    -> mountain and alpine terrain
+    -> wetland
+    -> climate-driven land cover
 ```
+
+Ocean water still comes from the primary elevation field and sea-level threshold. Lakes and inland seas require additional deterministic basin fields: lake basins at regional or local scales, and inland-sea basins at broader scales. The distinction is based on generated basin scale and depth, not a global connectivity search or flood fill. This preserves bounded, stateless tile generation. An inland sea may therefore be understood as a very large generated lake rather than water proven to be disconnected from every ocean in the unbounded world.
+
+Marsh and swamp should be distinguished primarily by climate and vegetation tendency: marshes favor open, saturated lowlands, while swamps favor warmer or forested saturated lowlands. Volcanoes should be rare products of regional volcanic tendency, uplift, and local peak structure rather than independent random tile assignments.
 
 This makes terrain explainable and easier to tune.
 
