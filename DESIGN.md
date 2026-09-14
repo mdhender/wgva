@@ -1906,7 +1906,8 @@ This is one of the few places WGVA keeps a dependency WGVB dropped. WGVB wrote i
 ### 27.5 Opening gates
 
 ```text
-1. Verify PRAGMA application_id is WGVA (an empty database is initialized instead).
+1. Verify PRAGMA application_id is WGVA. An empty or absent file is initialized
+   only by `cmd/wgva-world create` (section 29.5); every other tool refuses it.
 2. Read PRAGMA user_version and reject a schema newer than the binary.
 3. Apply supported ordered schema migrations.
 4. Read and validate the singleton world metadata and complete configuration.
@@ -2009,6 +2010,7 @@ wgva/
         player.go               player frames: origin q, origin r, rotation
     cmd/
         wgva-tune/              the terrain tuning tool          — phase 2
+        wgva-world/             creates a world file             — phase 8
         wgva-map/               one window to one image file     — phase 8
         wgva-serve/             the map viewer                   — phase 8
 ```
@@ -2021,6 +2023,10 @@ cmd/wgva-tune   ->  view  ->  render  ->  wgva
       +-> config ----------------+------>  wgva
       (deliberately no store edge)
 
+cmd/wgva-world  ->  store  ------------->  wgva
+      +-> config ------------->  wgva
+      (deliberately no render edge)
+
 cmd/wgva-map    ->  render  ->  wgva
       +-> store  ------------->  wgva
       +-> config ------------->  wgva
@@ -2031,13 +2037,21 @@ cmd/wgva-serve  ->  view  ->  render  ->  wgva
 
 **Go's import cycle rule is doing real work here.** `store`, `render`, `config`, and `view` all import `wgva`, so `wgva` **cannot** import any of them — the compiler refuses, with no lint and no review needed. "Do not introduce persistence into the core package" stops being advice and becomes a fact of the build. The previous revision could only ask.
 
-What the cycle rule does *not* give is the other direction, so one rule needs a test:
+What the cycle rule does *not* give is the other direction, so two commands
+need a test apiece. They are a matched pair, and the symmetry is the point:
 
 > **`cmd/wgva-tune` must never import `store`, directly or transitively.** It
 > cannot open a world, create one, or write to one, and that is what makes the
-> claim safe to make out loud rather than carefully. Nothing in the language
-> enforces it, so `cmd/wgva-tune/deps_test.go` runs `go list -deps` over the
-> package and fails if `github.com/mdhender/wgva/store` appears.
+> claim safe to make out loud rather than carefully.
+>
+> **`cmd/wgva-world` must never import `render`.** Creating a world is not a
+> drawing act, and a world builder that could draw would grow a `--preview` flag
+> and then a viewport grammar and then a second opinion about what a window is.
+
+Nothing in the language enforces either, so `deps_test.go` in each package runs
+`go list -deps` and fails if the forbidden import path appears. **The tool that
+decides how worlds look cannot touch a world; the tool that makes a world cannot
+draw one.**
 
 Two intermediate packages exist because a thing would otherwise be written twice:
 
@@ -2054,7 +2068,20 @@ Two intermediate packages exist because a thing would otherwise be written twice
 
 The store's half is a `player` table keyed by player identity rather than by `(q, r)`, because the origin is a value there and not a key. It is written once, when the player is created, and there is no operation that moves a frame afterwards — origin and rotation are what every coordinate and heading that player has ever been given *mean*, so changing one would silently relabel all of it. The rotation is validated to `0..6` on write and again on read; an out-of-range stored value is a typed refusal, never a `FloorMod`.
 
-`cmd/wgva-serve` is a separate command rather than a mode of `cmd/wgva-map`, and both are separate from `cmd/wgva-tune`. Each has a different standing — one writes a file, one shows a saved world, one changes a configuration — and collapsing them would make `--help` a lie about what the tool can touch.
+Each command is separate rather than a mode of another, because each has a
+different standing against the two things worth protecting — the configuration
+and the world file:
+
+| command | the configuration | the world file |
+|---|---|---|
+| `cmd/wgva-tune` | changes it | cannot reach one |
+| `cmd/wgva-world` | reads one | **creates** one |
+| `cmd/wgva-map` | reads one | opens one, read-only |
+| `cmd/wgva-serve` | reads it *from* the world | opens one, read-only |
+
+Nothing in this table writes to a world after creation. Player overlays are
+written by the game engine, which is outside this document. Collapsing any two
+rows would make `--help` a lie about what the tool can touch.
 
 ---
 
@@ -2138,6 +2165,15 @@ a query string.
 
 What it gives up is real and is named on every page: a link to a window shows what that process is drawing *now*, not what it drew when the link was copied. What it keeps is the fingerprint. Every tab prints it, the download turns the configuration behind it back into a file, and `wgva-map --config` draws that file — so a picture can always be traced to the configuration that produced it and reproduced outside the tool.
 
+**A fingerprint is not enough on its own, because comparing two hashes by eye is
+a thing nobody does.** Section 21.2 makes the default configuration's
+fingerprint a written-down constant, so the tool knows that value and must say
+which side of it the session is on: every tab labels the configuration either as
+**this binary's defaults** or as **modified**, conspicuously, beside the
+fingerprint. Section 29.5 is why that label earns its place — it is the one
+thing standing between an administrator and a world that is not the one they
+chose.
+
 #### The grid
 
 One pixel per hex — or N, at an explicit scale — so that a million tiles can be looked at in one image. `Viewport` is a rectangle of even-`q` offset cells and `Viewport.CoordAt` is the offset conversion, so the grid is the same window walk with hex hit testing dropped, sharing one function with the hex path. It lives in `render` as `RenderGrid`, and `wgva-map --grid` draws it too, which is how the sheets under `docs/renders/` are made.
@@ -2214,7 +2250,13 @@ wgva-map \
     --out map.png
 ```
 
-Use the standard library `flag` package. The database supplies the seed, the algorithm version, the component width, and the effective configuration. If this command creates a new database, creation writes all of those values before rendering; it must never override them when opening an existing database. `cols` and `rows` are tile counts; `hex-radius` is a pixel dimension.
+Use the standard library `flag` package. The database supplies the seed, the algorithm version, the component width, and the effective configuration, and **this command never creates or modifies one** — an absent or empty file is a refusal naming `wgva-world create`, not an invitation. `cols` and `rows` are tile counts; `hex-radius` is a pixel dimension.
+
+> **It does not read pixels out of the database either.** No tiles are stored
+> (section 27.6), so `--db` supplies the world's *identity* — seed, algorithm
+> version, component width, configuration, fingerprint — and the image is
+> regenerated from it every time. The only thing genuinely read from the file
+> and drawn is the player overlays of section 29.4.
 
 `--config` draws a configuration file from the tuning tool with no database at all, and `--grid` draws the one-pixel-per-hex view. Both are diagnostic and neither represents a saved world; the output should say so where it can.
 
@@ -2272,7 +2314,7 @@ Bounded like everything else that renders, on the same terms as section 29.1, pl
 
 Two modes, and the seed means something different in each. Without `--db` the generator is constructed in memory from the seed in the route and the default configuration, so **output is diagnostic and does not represent a saved world**, and the page says so; every seed is servable, because the route is where the world comes from. With `--db` the database supplies the seed, the algorithm version, the component width, and the complete effective configuration, and **the seed in the route is a check against the stored one rather than the source of it** — another seed is a 404 naming the one this server holds. Overlays are read fresh from the database on every request, so exploring a world and refreshing shows the exploration.
 
-Open one connection per worker **before the port is bound**: a database that fails an opening gate is a server that does not start rather than a server that answers every request with a 500. The server opens and never creates — `wgva-map --db` creates a world, because creating one is a decision rather than a side effect of a typo.
+Open one connection per worker **before the port is bound**: a database that fails an opening gate is a server that does not start rather than a server that answers every request with a 500. The server opens and never creates; `wgva-world create` is the only thing that does, because creating a world is a decision rather than a side effect of a typo in a path.
 
 **The server and the CLI must agree byte for byte.** Two front ends over one renderer must not be allowed to drift, and that is one assertion rather than a second set of goldens: the existing golden image already pins what the renderer draws, and a second copy of it in the server's package would only pin it twice.
 
@@ -2298,6 +2340,118 @@ Two composition rules, and they differ on purpose:
 
 `RenderVersion` does not move for overlay work. Every pixel the terrain renderer produces stays bit-identical to what it produced before overlays existed; bumping it would claim a cache of terrain PNGs is stale when it is not. Note also what that version does *not* cover: a cached player PNG depends on the overlays as well as the palette, and overlays are mutable player state with no version at all. That is a reason not to cache one.
 
+
+---
+
+### 29.5 The administrator's path
+
+Sections 29.1 to 29.3 describe three tools by what each one *is*. This section
+describes the order somebody uses them in, because the order is not obvious from
+the descriptions and one step of it was discovered rather than designed.
+
+**`wgva-tune` has two users doing opposite jobs.**
+
+- The **developer** varies the configuration and holds the seed steady. That is
+  what section 29.1 is written for, and it is why the configuration lives in
+  process memory and the seed lives in the URL.
+- The **administrator** holds the configuration steady and varies the seed,
+  looking for a world worth playing on. Nobody designed this; administrators
+  found it, because it is faster and more versatile than the alternative — which
+  is to create a database per candidate seed, render a window, look, and clean
+  up.
+
+The tool suits the second job by accident, and the accident is worth keeping:
+the seed is a route segment, so sampling seeds is pure navigation with a working
+back button, a promising seed is a link somebody can paste into an issue, and
+the grid tab shows a whole continental arrangement in one image rather than a
+viewport at a time.
+
+#### The trap, and the label that closes it
+
+The configuration is the one thing *not* in the URL, and section 29.1 says so
+plainly: a link shows what that process is drawing **now**, not what it drew
+when the link was copied. So an administrator who samples seeds in a session
+where anyone has touched the configuration form is judging worlds under a
+configuration that exists nowhere but that process's memory. Create a world from
+the shipped defaults afterwards and the seed is right and the map is different.
+
+**Nothing errors**, which is what makes this worth a paragraph rather than a
+sentence: every value involved is valid, every gate passes, and the world is
+reproducible — just not the one that was chosen.
+
+Two cheap things close it, and both are already implied by what the design
+stores:
+
+1. **The tuning tool labels its configuration as this binary's defaults or as
+   modified**, on every tab, against the written-down constant of section 21.2.
+   Comparing two fingerprints by eye is a thing nobody actually does; reading one
+   word is.
+2. **`wgva-world create` prints the fingerprint it wrote**, so it can be matched
+   against what the browser showed before anybody plays on it.
+
+An administrator sampling seeds never needs the `POST` routes at all, so a
+session started for that purpose can reasonably refuse them — but the label is
+the load-bearing half and the refusal is only a convenience.
+
+#### The walkthrough
+
+1. **Tune.** Developer, phase 2 onward, no database anywhere. `wgva-tune`: move
+   numbers, watch the distribution readout say what the threshold just did,
+   download `config.toml`. That file is the only output.
+2. **Check the file outside the browser.** `wgva-map --config config.toml --seed
+   … --out sheet.png`, still no database. Confirms the file reproduces what the
+   tab showed, and is how the acceptance sheets under `docs/renders/` are made.
+3. **Ship the defaults.** The configuration the developer settles on becomes the
+   binary's built-in defaults, and its fingerprint becomes the constant in
+   `config/fingerprint_test.go` (section 21.2). After this, steps 4 to 6 need no
+   configuration file at all. **This is the handoff**: everything above it is the
+   developer's and everything below it is the administrator's.
+4. **Sample seeds.** Administrator, still no database. `wgva-tune`, confirm the
+   page says *defaults*, then walk seeds in the grid tab until a world looks
+   worth playing on. Keep the link.
+5. **Create the world.** `wgva-world create --seed <hex> world.wgva`. Writes the
+   seed, algorithm version, component width, complete effective configuration,
+   and fingerprint before anything else; refuses a file that already exists;
+   prints the fingerprint. This is the only moment a world file comes into
+   existence.
+6. **Look at it.** `wgva-serve --db world.wgva` for the viewer, `wgva-map --db
+   world.wgva …` for an image file. Both open; neither writes.
+7. **Change your mind.** During alpha, do not migrate: delete the file and
+   return to step 4. `AGENTS.md`, *Alpha workflow*, records why that is cheap
+   and when it stops being.
+
+Steps 1 and 2 need only phase 2. Steps 4 to 6 need phase 8. That gap is the
+whole argument for the build order in section 32 — the half of this process that
+decides what a world looks like is available six phases before the half that
+saves one.
+
+#### `cmd/wgva-world`
+
+Creating a world is not a rendering act, which is why it is not a mode of
+`wgva-map`. An administrator's gesture at step 5 is *make me this world*, not
+*draw me a picture and incidentally make a world first*; and a creation path
+reached by passing a database flag with a path that happens not to exist yet is
+exactly the typo-becomes-a-side-effect that the rest of section 27 refuses.
+
+```sh
+wgva-world create --seed 0123456789abcdef [--config config.toml] world.wgva
+```
+
+- `--seed` is sixteen hexadecimal digits, matching section 29.1's spelling
+  rather than `wgva-map --seed`'s decimal. A world is created once, and the seed
+  is copied out of a browser when it happens, so this is the spelling that
+  matters here.
+- `--config` is optional and defaults to the binary's built-in defaults, because
+  after step 3 that is the ordinary case. When given, the file's fingerprint is
+  recomputed rather than trusted from its comment header, and printed either way.
+- The command **refuses an existing file**. There is no `--force`: removing a
+  world is something a person does deliberately, with `rm`.
+- It takes no viewport, no layer, and no output image, and it *cannot* —
+  `cmd/wgva-world` does not import `render`, and a test asserts it (section 28).
+
+Inspection subcommands belong here too when something asks for them: running the
+seven gates of section 27.5 by hand against a file, or printing its stored
+metadata, is the same job from the other direction. Do not add them first.
 
 ---
 
@@ -2577,13 +2731,16 @@ Settling them is a specific act, not a feeling: write the fingerprint of the def
 
 ### Phase 8 — Persistence, the CLI, the viewer, and player rendering
 
-Implement the single-world SQLite database, the migration ladder, all seven compatibility gates, canonical configuration persistence and fingerprint validation; `cmd/wgva-map`; `cmd/wgva-serve`; and player-facing terrain and overlay composition.
+Implement the single-world SQLite database, the migration ladder, all seven compatibility gates, canonical configuration persistence and fingerprint validation; `cmd/wgva-world`, `cmd/wgva-map`, and `cmd/wgva-serve`; and player-facing terrain and overlay composition.
+
+Section 29.5 is the order these are used in, and it is worth reading before building them: the administrator's path runs `wgva-tune` → `wgva-world create` → `wgva-serve`, and `wgva-map` sits beside that path rather than on it.
 
 Everything in this phase exists because a *game* needs it. None of it is needed to decide what a world looks like, which is why it is last.
 
-> **Exit:** a database can create, reopen, and reproduce one world safely. Every
-> gate is asserted with `errors.Is`. Multiple seeds and distant coordinate
-> windows produce varied but coherent maps and player PNGs, and the CLI and both
+> **Exit:** a database can be created, reopened, and reproduced safely. Every
+> gate is asserted with `errors.Is`. Only `wgva-world` creates one, and a
+> `go list -deps` test says so. Multiple seeds and distant coordinate windows
+> produce varied but coherent maps and player PNGs, and the CLI and both web
 > front ends agree byte for byte.
 
 ### Phase 9 — The component width change

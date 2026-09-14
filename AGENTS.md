@@ -283,6 +283,14 @@ These are the rules most likely to be violated by code that looks correct.
 - Rendering is bounded even though generation is effectively unbounded. Every
   render request defines a finite viewport and explicit pixel scale. Renderer
   pixel coordinates never feed back into generation.
+- **Only `cmd/wgva-world` creates a world file.** Everything else opens one and
+  refuses an absent or empty file rather than initializing it. `wgva-map --db`
+  reads a world's *identity* — seed, version, width, configuration — and
+  regenerates; it does not read stored tiles, because there are none.
+- The tuning tool labels its configuration **defaults** or **modified** on every
+  tab, against the fingerprint constant of `DESIGN.md` 21.2. That label is what
+  keeps an administrator sampling seeds from creating a world that is not the one
+  they chose; see `DESIGN.md` 29.5.
 - Render coordinates in a stable sorted order; overlapping edges and labels make
   output order-dependent otherwise.
 - Keep generated terrain separate from player overlays (discoveries, fog of
@@ -340,6 +348,7 @@ what it is built as.
 | command | say | in one line |
 |---|---|---|
 | `cmd/wgva-tune` | the terrain tuning tool | decides how worlds look; cannot open or change one |
+| `cmd/wgva-world` | the world builder | creates a world file from a seed; cannot draw one |
 | `cmd/wgva-serve` | the map viewer | looks at a world that is already saved |
 | `cmd/wgva-map` | the map renderer | writes one window to one image file |
 
@@ -354,7 +363,10 @@ what it is built as.
   player ever touches it.*
 - **Volunteer that it cannot touch a saved world.** That question gets asked
   eventually, and the answer is better than "we are careful": `cmd/wgva-tune`
-  has no import path to `store`, and `deps_test.go` fails if one appears.
+  has no import path to `store`, and `deps_test.go` fails if one appears. Its
+  mirror image is `cmd/wgva-world`, which has no import path to `render`: the
+  tool that decides how worlds look cannot touch a world, and the tool that
+  makes a world cannot draw one.
 - **Report the output, not the tool.** The deliverable is that the world's
   appearance is a versioned file with a fingerprint on it, so any picture can be
   traced to the configuration that produced it and reproduced elsewhere. The web

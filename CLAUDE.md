@@ -66,9 +66,10 @@ that hold or to keep it honest.
 ### The dependency graph is load-bearing
 
 ```text
-cmd/wgva-tune   ->  view  ->  render  ->  wgva      (no store edge, by design)
-cmd/wgva-map    ->  render, store, config  ->  wgva
-cmd/wgva-serve  ->  view, render, store    ->  wgva
+cmd/wgva-tune   ->  view, render, config    ->  wgva   (no store edge, by design)
+cmd/wgva-world  ->  store, config           ->  wgva   (no render edge, by design)
+cmd/wgva-map    ->  render, store, config   ->  wgva
+cmd/wgva-serve  ->  view, render, store     ->  wgva
 ```
 
 `store`, `render`, `config`, and `view` all import `wgva`, so **`wgva` cannot
@@ -77,9 +78,11 @@ rendering are not in the core" a fact of the build rather than a review
 convention. The `wgva` package depends on the standard library and nothing else;
 `hexg`, SQLite, CBOR, TOML, and PNG all live outside it.
 
-The one edge the compiler cannot forbid is `cmd/wgva-tune` importing `store`, so
-a `go list -deps` test enforces it. That absence is what lets the tuning tool be
-described as unable to open or change a saved world.
+The two edges the compiler cannot forbid are `cmd/wgva-tune` importing `store`
+and `cmd/wgva-world` importing `render`, so a `go list -deps` test in each
+package enforces them. The tool that decides how worlds look cannot touch a
+world; the tool that makes a world cannot draw one. `DESIGN.md` section 29.5 is
+the order an administrator uses them in and why the split exists.
 
 ### Four layers, in order
 
