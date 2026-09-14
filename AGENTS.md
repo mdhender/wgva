@@ -43,7 +43,19 @@ pre-release stays `alpha` for the whole of alpha.
 | A feature implemented | minor |
 | A bug fixed | minor |
 | Any other code change — a tweaked setting, a refactor, a test | patch |
-| Documentation only | none |
+| A change to `DESIGN.md` that specifies new or changed behavior | as the code it specifies |
+| Documentation only — prose, structure, a clarification | none |
+
+**When the two documentation rows are hard to tell apart, over-bump.** A version
+that moved further than it strictly had to costs nothing during alpha; one that
+did not move when it should have has lost information that cannot be recovered
+later, because nothing else in the history records that the behavior changed.
+Doubt resolves upward: docs-or-design becomes a design change, patch-or-minor
+becomes minor.
+
+That row exists because `DESIGN.md` is ahead of the code and is the deliverable
+for now. Specifying a new command is a feature whether or not it has been
+written yet; rewording the paragraph that describes it is not.
 
 **The bump goes in the same commit as the change it describes**, never in a
 commit of its own: a version bump with nothing beside it is a number with no
@@ -55,7 +67,10 @@ git push origin main --follow-tags
 ```
 
 A docs-only commit gets no bump and no tag, which is why the design revision
-that rewrote `DESIGN.md` and this file carries neither.
+that rewrote `DESIGN.md` and this file carries neither. Splitting world creation
+out of `wgva-map` did get one — `v0.2.0-alpha` — because it specified a command
+that had not existed, which is the distinction the table's two documentation
+rows are drawing.
 
 ### The generator's own version numbers do not get ceremony yet
 
