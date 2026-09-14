@@ -29,6 +29,13 @@ type Generator struct {
 	// continuous scales a diagnostic layer draws raw: what a window shows is
 	// the fold, which is what elevation reads.
 	ridge Field
+
+	// The three fields the climate composite of DESIGN.md 16 reads: the broad
+	// heat zones, the broad moisture field, and the local moisture variation.
+	// Each has its own hashing domain, so no two of them share a lattice.
+	heat              Field
+	moisture          Field
+	moistureVariation Field
 }
 
 // New returns a generator for the seed and configuration, or the first reason
@@ -50,8 +57,13 @@ func New(seed Seed, cfg Config) (*Generator, error) {
 	}
 
 	g.ridge = DeriveRidgeField(seed, cfg)
-	if err := g.ridge.Validate(); err != nil {
-		return nil, err
+	g.heat = DeriveHeatField(seed, cfg)
+	g.moisture = DeriveMoistureField(seed, cfg)
+	g.moistureVariation = DeriveMoistureVariationField(seed, cfg)
+	for _, f := range []*Field{&g.ridge, &g.heat, &g.moisture, &g.moistureVariation} {
+		if err := f.Validate(); err != nil {
+			return nil, err
+		}
 	}
 
 	return g, nil
@@ -151,6 +163,20 @@ type Sample struct {
 	// Band is the elevation classification of that scalar.
 	Band Elevation
 
+	// Heat and Moisture are the two climate scalars of DESIGN.md 16: -1 polar
+	// and arid, 0 the middle of the temperate and moderate bands, +1 hot and
+	// saturated. Each is bit-identical to HeatAt and MoistureAt, which a test
+	// asserts.
+	//
+	// They are two values rather than one because the axes are independent, and
+	// the reason they are computed together is that both read the elevation
+	// composite above them. See DESIGN.md 16.1.
+	Heat     float64
+	Moisture float64
+
+	// Climate is the two-axis classification of those scalars.
+	Climate Climate
+
 	// RimDistance is hexes from the outer edge of the map. See DESIGN.md 15.1.
 	RimDistance int64
 }
@@ -161,11 +187,13 @@ type Sample struct {
 // a convenience that computed something slightly different from the thing it is
 // a convenience for would be worse than not having it.
 func (g *Generator) Sample(c Coord) Sample {
-	// One evaluation of the composite, taken apart. A Sample does not carry a
-	// Tile and does not call Relief: a sample is one elevation evaluation and
-	// relief is seven, which is the distinction render.Layer.Cost is built on.
-	// DESIGN.md 4.3.
+	// One evaluation of each composite at this coordinate, taken apart. A
+	// Sample does not carry a Tile and does not call Relief, and that is the
+	// shape rather than an omission: everything here is a function of this
+	// coordinate alone, while relief reads the six neighbors and costs seven.
+	// That is the distinction render.Layer.Cost is built on. DESIGN.md 4.3.
 	parts := g.elevationAt(c)
+	climate := g.climateAt(parts.pos, parts.region, parts.elevation)
 
 	return Sample{
 		Coord:           c,
@@ -179,6 +207,9 @@ func (g *Generator) Sample(c Coord) Sample {
 		Ridge:           parts.ridge,
 		Elevation:       parts.elevation,
 		Band:            g.cfg.Elevation.Bands.Classify(parts.elevation),
+		Heat:            climate.heat,
+		Moisture:        climate.moisture,
+		Climate:         g.cfg.Climate.classify(climate),
 		RimDistance:     c.RimDistance(),
 	}
 }

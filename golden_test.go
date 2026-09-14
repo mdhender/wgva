@@ -335,3 +335,124 @@ func TestGoldenElevation(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The climate composite
+// ---------------------------------------------------------------------------
+
+// The fourth golden table: the two climate axes of DESIGN.md 16 at the same
+// coordinates, under the same seed and the same defaults.
+//
+// A separate table again, for the reason the others are separate from each
+// other. What it pins that nothing above it does: the heat composite reads the
+// elevation composite's output, so this is the only table where a change to
+// elevation shows up twice — once in its own table and once here — and the
+// difference between "elevation moved" and "only climate moved" is the
+// difference between two commits.
+//
+// The two bands are recorded beside the two scalars for the reason the
+// elevation band is: a threshold moved by a hair moves no float in this table
+// and moves a band.
+//
+// The coordinates that are far apart cover all five heat bands and all five
+// moisture bands between them, which is worth knowing: the rows near the origin
+// are all one climate, because the heat field's wavelength is twelve thousand
+// miles and they are a few dozen miles apart. That is the model working, and a
+// table where the neighbors of the origin differed in band would be a heat
+// field that had descended into the tile grid.
+//
+// Recorded under AlgorithmVersion 4 at world radius 32767.
+
+// goldenClimateRow is one coordinate, the float64 bits of the two climate
+// scalars, and the two bands they classify to.
+type goldenClimateRow struct {
+	q, r         int64
+	heat         uint64
+	moisture     uint64
+	heatBand     HeatBand
+	moistureBand MoistureBand
+}
+
+// goldenClimateValues is one row per coordinate in goldenCoords, in that order.
+var goldenClimateValues = []goldenClimateRow{
+	{0, 0, 0x3fe8dd08acd60bc0, 0xbfe1a0aaf44c712e, HeatHot, MoistureDry},
+	{1, 0, 0x3fe8e58b926accbe, 0xbfe203f576e89aa4, HeatHot, MoistureDry},
+	{0, 1, 0x3fe8dfb3ea5d2ba0, 0xbfe17f2d115ac310, HeatHot, MoistureDry},
+	{-1, 0, 0x3fe8d478cbf941aa, 0xbfe1c2d2564f0489, HeatHot, MoistureDry},
+	{0, -1, 0x3fe8da3c1bc43212, 0xbfe1e359867e2ecc, HeatHot, MoistureDry},
+	{1, -1, 0x3fe8e2a526f60b8c, 0xbfe2196ee0c0ee1c, HeatHot, MoistureDry},
+	{-1, 1, 0x3fe8d710f35def8c, 0xbfe1c6339de06ce6, HeatHot, MoistureDry},
+	{7, 11, 0x3fe92adb9237c9be, 0xbfe3ab7d63db1bd0, HeatHot, MoistureArid},
+	{-7, 11, 0x3fe8ac935c2b9a4c, 0xbfe3f817e1becdb9, HeatHot, MoistureArid},
+	{7, -11, 0x3fe8ebf2a2bfa7ca, 0xbfe0fe14c78a3702, HeatHot, MoistureDry},
+	{-7, -11, 0x3fe5e752fd2931b8, 0xbfe143cef1591f72, HeatHot, MoistureDry},
+	{1000, 0, 0x3fdbc8b0435b0e34, 0x3fcb764d1ff53c38, HeatWarm, MoistureHumid},
+	{0, 1000, 0xbfec65aea1c9414f, 0xbf93346f8aee8220, HeatPolar, MoistureModerate},
+	{-1000, -1000, 0x3fdb988c68cb5670, 0x3fc7632f8fcabbe0, HeatWarm, MoistureModerate},
+	{12345, -6789, 0xbfe1deee52fde538, 0xbfaec96f8fe2f820, HeatCold, MoistureModerate},
+	{32767, 0, 0x3fe758957113315f, 0x3f8dfd5bdbe8df00, HeatHot, MoistureModerate},
+	{0, 32767, 0x3fe9035cb57bf1ba, 0xbfe197cb0cfadc2e, HeatHot, MoistureDry},
+	{-32767, 0, 0x3fa0266f18b560e0, 0x3fe091c80c98fff6, HeatTemperate, MoistureHumid},
+	{0, -32767, 0x3fb950ca3a90fbf0, 0x3fe05c75196ca31e, HeatTemperate, MoistureHumid},
+	{32767, -32767, 0x3fba0b3eebd9451a, 0x3fe3710088d457f6, HeatTemperate, MoistureSaturated},
+	{-32767, 32767, 0xbfe4204766a7ea99, 0xbfaba77b6a55ddd0, HeatPolar, MoistureModerate},
+	{16384, -32767, 0x3fc3c9d67096b988, 0xbfcab849f3a3320c, HeatTemperate, MoistureDry},
+	{65535, -32767, 0x3fe8dd08acd60bc0, 0xbfe1a0aaf44c712e, HeatHot, MoistureDry},
+	{32768, 0, 0xbfe4204766a7ea99, 0xbfaba77b6a55ddd0, HeatPolar, MoistureModerate},
+}
+
+func TestGoldenClimate(t *testing.T) {
+	if len(goldenClimateValues) != len(goldenCoords) {
+		t.Fatalf("the climate golden table has %d rows for %d coordinates", len(goldenClimateValues), len(goldenCoords))
+	}
+
+	g := NewDefault(goldenSeed)
+	for i, row := range goldenClimateValues {
+		if [2]int64{row.q, row.r} != goldenCoords[i] {
+			t.Fatalf("row %d is for (%d, %d), want (%d, %d)", i, row.q, row.r, goldenCoords[i][0], goldenCoords[i][1])
+		}
+		c := NewCoord(row.q, row.r)
+		s := g.Sample(c)
+
+		for _, f := range []struct {
+			name string
+			got  uint64
+			want uint64
+		}{
+			{"heat", math.Float64bits(s.Heat), row.heat},
+			{"moisture", math.Float64bits(s.Moisture), row.moisture},
+		} {
+			if f.got != f.want {
+				t.Errorf("%s at (%d, %d) = %#016x (%v), want %#016x (%v)",
+					f.name, row.q, row.r, f.got, math.Float64frombits(f.got), f.want, math.Float64frombits(f.want))
+			}
+		}
+
+		if want := (Climate{Heat: row.heatBand, Moisture: row.moistureBand}); s.Climate != want {
+			t.Errorf("climate at (%d, %d) = %v, want %v", row.q, row.r, s.Climate, want)
+		}
+	}
+}
+
+// TestGoldenClimateCoversEveryBand states what the table above is also good
+// for: between them the rows produce all five heat bands and all five moisture
+// bands, so the golden suite is a reachability check on both ladders as well as
+// a bit-pattern check. See DESIGN.md 30.8.
+func TestGoldenClimateCoversEveryBand(t *testing.T) {
+	heat := map[HeatBand]bool{}
+	moisture := map[MoistureBand]bool{}
+	for _, row := range goldenClimateValues {
+		heat[row.heatBand] = true
+		moisture[row.moistureBand] = true
+	}
+	for _, h := range Heats() {
+		if !heat[h] {
+			t.Errorf("no golden coordinate is %v", h)
+		}
+	}
+	for _, m := range Moistures() {
+		if !moisture[m] {
+			t.Errorf("no golden coordinate is %v", m)
+		}
+	}
+}

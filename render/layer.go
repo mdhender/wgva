@@ -73,17 +73,21 @@ var ErrUnknownLayer = errors.New("unknown layer")
 
 // AllLayers returns every layer, in a fixed order.
 //
-// DESIGN.md 29 lists seventeen. Ten of them are here, and they are the ten that
-// exist: the raw noise scales of DESIGN.md 10, which separate "the noise is
+// DESIGN.md 29 lists seventeen. Twelve of them are here, and they are the twelve
+// that exist: the raw noise scales of DESIGN.md 10, which separate "the noise is
 // wrong" from "the composition is wrong" when a window looks off; the four the
 // elevation composite adds, which separate it further into the four scales
-// alone, the finished scalar, the slope, and the ridge term; and the two that
-// draw the blended region influence of DESIGN.md 11.2 — which is what the
-// anchor lattice has to be looked for in, because a lattice nothing draws is a
-// lattice nobody sees until it is under a coastline. Climate, terrain, the
-// basins, the volcanic field, and the rim arrive with the phases that compute
-// them; a layer that named a field nothing generates yet would be a control
-// that draws an error.
+// alone, the finished scalar, the slope, and the ridge term; the two that draw
+// the blended region influence of DESIGN.md 11.2 — which is what the anchor
+// lattice has to be looked for in, because a lattice nothing draws is a lattice
+// nobody sees until it is under a coastline; and the two climate axes, drawn
+// apart because they are apart. The `climate` layer that puts them back together
+// as a two-axis band table is not here: it is the one thing in this package that
+// is not a scalar ramp, and it arrives in DESIGN.md 32's phase 6 beside the
+// terrain vocabulary it shares a legend shape with. Terrain, the basins, the
+// volcanic field, and the rim arrive with the phases that compute them too; a
+// layer that named a field nothing generates yet would be a control that draws
+// an error.
 func AllLayers() []Layer { return slices.Clone(layers) }
 
 // LayerNamed returns the layer with that name.
@@ -183,7 +187,7 @@ func buildLayers() []Layer {
 	// row of lozenges or a Voronoi plateau shows up while it can still be
 	// fixed. Look for them in the grid tab at a scale where a region is a few
 	// pixels across. See DESIGN.md 11.2.
-	return append(out,
+	out = append(out,
 		Layer{
 			Name:   "region-influence",
 			Doc:    "the blended regional elevation bias: what regional uplift is made of",
@@ -197,6 +201,40 @@ func buildLayers() []Layer {
 			Cost:   1,
 			key:    signedKey,
 			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.RegionInfluence(c).Roughness },
+		},
+	)
+
+	// The two climate axes, drawn one at a time and never together. They are
+	// independent — a polar desert and a polar rainforest are both ordinary
+	// places — so two pictures is what the model actually says, and a single
+	// picture of "climate" would have to invent a combined quantity to color by.
+	// Each gets its own ramp for the same reason: a reader brings a convention
+	// to a temperature and another one to rainfall, and two layers in one set of
+	// colors invite a comparison the axes do not support. See DESIGN.md 16.1.
+	//
+	// Both cost one evaluation a tile. The climate composite reads the elevation
+	// scalar at the tile and nothing around it; nothing here looks at a
+	// neighbor, which is what separates these from relief.
+	return append(out,
+		Layer{
+			Name: "temperature",
+			Doc:  "the heat scalar: -1 polar, 0 the middle of the temperate band, +1 hot, with the lapse rate already taken off the high ground",
+			Cost: 1,
+			key: Key{
+				Kind: KeyRamp, Ramp: TemperatureRamp,
+				Lo: -1, Hi: +1, LoLabel: "polar", HiLabel: "hot",
+			},
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.HeatAt(c) },
+		},
+		Layer{
+			Name: "moisture",
+			Doc:  "the moisture scalar: -1 arid, 0 the middle of the moderate band, +1 saturated",
+			Cost: 1,
+			key: Key{
+				Kind: KeyRamp, Ramp: MoistureRamp,
+				Lo: -1, Hi: +1, LoLabel: "arid", HiLabel: "saturated",
+			},
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.MoistureAt(c) },
 		},
 	)
 }

@@ -68,8 +68,8 @@ type Field struct {
 //
 // The order is the order a person reads: what the world is, then the four
 // continuous scales coarse to fine, then the warp, then what the elevation
-// composite makes of them, then the ridge structure, then the addressing
-// hierarchy, then the rim.
+// composite makes of them, then the ridge structure, then the two climate axes,
+// then the addressing hierarchy, then the rim.
 func Fields() []Field { return fieldTable }
 
 var fieldTable = buildFieldTable()
@@ -101,7 +101,7 @@ func buildFieldTable() []Field {
 	table = append(table, ladderFields("ridge", "Elevation.Ridge",
 		"the ridge structure's own field; its wavelength is the spacing of a mountain belt, not of a peak")...)
 
-	return append(table, []Field{
+	table = append(table, []Field{
 		{
 			Key: "ridge_stride_miles", Path: "Elevation.RidgeStrideMiles", Group: "ridge", Kind: ValueScalar,
 			Doc: "how far the directional blur reaches along the region's ridge orientation; zero leaves an isotropic web of creases",
@@ -114,6 +114,19 @@ func buildFieldTable() []Field {
 			Key: "ridge_onset", Path: "Elevation.RidgeOnset", Group: "ridge", Kind: ValueScalar,
 			Doc: "how far above sea level the ridge term reaches full strength; below it ridges are masked off so a belt does not surface as islands in open ocean",
 		},
+	}...)
+
+	table = append(table, ladderFields("heat", "Climate.Heat",
+		"the broad heat zones; its wavelength is the width of a climate zone, and it is the coarsest scale in the world because zones finer than continents read as weather")...)
+	table = append(table, heatFields()...)
+
+	table = append(table, ladderFields("moisture", "Climate.Moisture",
+		"the broad moisture field: where the wet part of the world is")...)
+	table = append(table, moistureFields()...)
+	table = append(table, ladderFields("moisture_variation", "Climate.MoistureVariation",
+		"the local moisture variation of DESIGN.md 16: why two neighboring valleys differ")...)
+
+	return append(table, []Field{
 		{
 			Key: "macro_region_size_hexes", Path: "MacroRegionSizeHexes", Group: "hierarchy", Kind: ValueCount,
 			Doc: "macro region spacing along either axial basis direction",
@@ -198,6 +211,94 @@ func elevationFields() []Field {
 		{
 			Key: "elevation_mountain", Path: "Elevation.Bands.Mountain", Group: "elevation", Kind: ValueScalar,
 			Doc: "where highland becomes mountain",
+		},
+	}
+}
+
+// heatFields returns the keys of the heat axis: what the broad field and the
+// region's bias are worth against each other, what altitude takes off the
+// result, and where the bands fall.
+//
+// The two axes are separate groups because they are independent. A form that
+// laid heat and moisture out together under one heading would be the single
+// combined climate value DESIGN.md 16.1 forbids, drawn as a page rather than
+// declared as a type.
+func heatFields() []Field {
+	return []Field{
+		{
+			Key: "climate_heat_field_weight", Path: "Climate.HeatFieldWeight", Group: "heat", Kind: ValueScalar,
+			Doc: "what the broad heat field is worth against the region's heat bias; the weights are relative and are normalized by their own total",
+		},
+		{
+			Key: "climate_heat_bias_weight", Path: "Climate.HeatBiasWeight", Group: "heat", Kind: ValueScalar,
+			Doc: "what a region's heat bias is worth against the broad field",
+		},
+		{
+			Key: "climate_elevation_cooling", Path: "Climate.ElevationCooling", Group: "heat", Kind: ValueScalar,
+			Doc: "how much heat the highest ground loses, per unit of elevation above sea level, in [0, 1]; it reads max(elevation, 0), so it cools land and leaves the ocean surface alone",
+		},
+		{
+			Key: "climate_heat_contrast_passes", Path: "Climate.HeatContrastPasses", Group: "heat", Kind: ValueCount,
+			Doc: "how many S-curve passes spread the heat base before the cooling is taken off it; zero is the identity, and a world with none is temperate almost everywhere",
+		},
+		{
+			Key: "climate_heat_polar", Path: "Climate.HeatBands.Polar", Group: "heat", Kind: ValueScalar,
+			Doc: "the heat at or below which a tile is polar; in (-1, +1), and below the cold threshold",
+		},
+		{
+			Key: "climate_heat_cold", Path: "Climate.HeatBands.Cold", Group: "heat", Kind: ValueScalar,
+			Doc: "where polar becomes cold",
+		},
+		{
+			Key: "climate_heat_temperate", Path: "Climate.HeatBands.Temperate", Group: "heat", Kind: ValueScalar,
+			Doc: "where cold becomes temperate",
+		},
+		{
+			Key: "climate_heat_warm", Path: "Climate.HeatBands.Warm", Group: "heat", Kind: ValueScalar,
+			Doc: "where warm becomes hot; above it is the top band",
+		},
+	}
+}
+
+// moistureFields returns the keys of the moisture axis. See heatFields.
+//
+// It sits under the same heading as the broad moisture field's ladder and ahead
+// of the local variation's, so the group is one contiguous run: a group name
+// that appeared twice would be written as two sections of one file with the
+// same title, which is a file nobody can diff.
+func moistureFields() []Field {
+	return []Field{
+		{
+			Key: "climate_moisture_field_weight", Path: "Climate.MoistureFieldWeight", Group: "moisture", Kind: ValueScalar,
+			Doc: "what the broad moisture field is worth against the other two terms",
+		},
+		{
+			Key: "climate_moisture_bias_weight", Path: "Climate.MoistureBiasWeight", Group: "moisture", Kind: ValueScalar,
+			Doc: "what a region's moisture bias is worth",
+		},
+		{
+			Key: "climate_moisture_variation_weight", Path: "Climate.MoistureVariationWeight", Group: "moisture", Kind: ValueScalar,
+			Doc: "what the local variation is worth; this is the one term in either axis that varies tile to tile, and it is what turns a climate map into speckle if it is allowed to matter",
+		},
+		{
+			Key: "climate_moisture_contrast_passes", Path: "Climate.MoistureContrastPasses", Group: "moisture", Kind: ValueCount,
+			Doc: "how many S-curve passes spread the moisture base; zero is the identity",
+		},
+		{
+			Key: "climate_moisture_arid", Path: "Climate.MoistureBands.Arid", Group: "moisture", Kind: ValueScalar,
+			Doc: "the moisture at or below which a tile is arid; in (-1, +1), and below the dry threshold",
+		},
+		{
+			Key: "climate_moisture_dry", Path: "Climate.MoistureBands.Dry", Group: "moisture", Kind: ValueScalar,
+			Doc: "where arid becomes dry",
+		},
+		{
+			Key: "climate_moisture_moderate", Path: "Climate.MoistureBands.Moderate", Group: "moisture", Kind: ValueScalar,
+			Doc: "where dry becomes moderate",
+		},
+		{
+			Key: "climate_moisture_humid", Path: "Climate.MoistureBands.Humid", Group: "moisture", Kind: ValueScalar,
+			Doc: "where humid becomes saturated; above it is the top band",
 		},
 	}
 }

@@ -131,6 +131,12 @@ type Config struct {
 	// region's biases buy, the ridge structure, and where the bands fall.
 	Elevation ElevationConfig
 
+	// Climate is the two axes of DESIGN.md 16: the broad heat zones and what
+	// altitude takes off them, the broad moisture field and its local
+	// variation, what a region's climate biases are worth in each, and where
+	// the two band ladders fall.
+	Climate ClimateConfig
+
 	// The three levels of the addressing hierarchy, in hexes along either axial
 	// basis direction. They are addressing devices and must never be visible in
 	// the output.
@@ -207,6 +213,73 @@ type ElevationConfig struct {
 // than a tuning one: past a few passes the composite is a two-valued mask and
 // what a fifth pass does is not a thing anybody is choosing.
 const MaxContrastPasses uint8 = 4
+
+// ClimateConfig is what the climate composite of DESIGN.md 16 weighs.
+//
+// The two axes are configured apart because they are independent: nothing here
+// lets a moisture setting move a temperature, and a type that mixed them would
+// be the single combined climate value DESIGN.md 16.1 forbids. What they share
+// is their shape — a weighted average of fields and region biases, a contrast
+// pass to decide how much of [-1, +1] the world actually uses, and a ladder of
+// four thresholds cutting the result into five bands.
+//
+// Each group's weights are relative and are normalized by their own total, so
+// scaling a group changes nothing and only the ratios within it are a decision.
+//
+// There is no latitude here and no field that stands in for one. The wrapped
+// world has no equator, so the broad zones are a field of their own; see
+// DESIGN.md 16 and Generator.climateAt.
+type ClimateConfig struct {
+	// Heat is the fbm ladder the broad heat zones are drawn from. Its
+	// wavelength is the width of a climate zone, and it is the coarsest scale
+	// in the world for a reason: zones that are finer than continents read as
+	// weather rather than as climate.
+	Heat LadderConfig
+
+	// HeatFieldWeight and HeatBiasWeight are what the broad field and the
+	// region's heat bias are worth against each other.
+	HeatFieldWeight float64
+	HeatBiasWeight  float64
+
+	// ElevationCooling is how much heat the highest ground loses, as heat per
+	// unit of elevation above sea level. It reads max(elevation, 0), so it
+	// cools land and leaves the ocean surface alone; see Generator.climateAt.
+	ElevationCooling float64
+
+	// HeatContrastPasses is how many S-curve passes spread the heat base before
+	// the cooling is taken off it. Zero is the identity and is a legitimate
+	// setting rather than a missing one, but a weighted average of fields that
+	// are each concentrated about zero is a world that is temperate almost
+	// everywhere. See contrast.
+	HeatContrastPasses uint8
+
+	// HeatBands are the thresholds that cut the heat scalar into the bands of
+	// DESIGN.md 16.1.
+	HeatBands HeatBands
+
+	// Moisture is the fbm ladder the broad moisture field is drawn from, and
+	// MoistureVariation is the local departure from it. The two are separate
+	// ladders under separate hashing domains because they are separate scales:
+	// one is where the wet part of the world is and the other is why two
+	// neighboring valleys differ.
+	Moisture          LadderConfig
+	MoistureVariation LadderConfig
+
+	// What the broad field, the region's moisture bias, and the local variation
+	// are worth against each other. The variation weight is the one to watch
+	// when a moisture map looks like speckle rather than like geography.
+	MoistureFieldWeight     float64
+	MoistureBiasWeight      float64
+	MoistureVariationWeight float64
+
+	// MoistureContrastPasses is how many S-curve passes spread the moisture
+	// base. See HeatContrastPasses.
+	MoistureContrastPasses uint8
+
+	// MoistureBands are the thresholds that cut the moisture scalar into the
+	// bands of DESIGN.md 16.1.
+	MoistureBands MoistureBands
+}
 
 // LadderConfig is one fbm ladder: where it starts, how many octaves it runs,
 // and how the wavelength and the amplitude change between them.
@@ -309,6 +382,43 @@ func DefaultConfig() Config {
 			},
 		},
 
+		Climate: ClimateConfig{
+			// 2000 hexes down to 500. Twice the continental wavelength, so a
+			// climate zone is larger than a continent rather than a feature of
+			// one — which is what a latitude band would be if the world had a
+			// latitude, and is why the first version needs none.
+			Heat:            LadderConfig{WavelengthMiles: 12000, Octaves: 3, Lacunarity: 2, Gain: 0.5},
+			HeatFieldWeight: 1,
+			HeatBiasWeight:  0.35,
+
+			// A tile at the top of the scale is a whole band colder than the
+			// same ground at sea level, which is what puts snow on a mountain
+			// standing in a temperate zone.
+			ElevationCooling:   0.5,
+			HeatContrastPasses: 1,
+
+			// Even fifths of the scalar's range. The middle band is temperate
+			// and the two ends are the extremes; nothing here is fixed by
+			// construction the way sea level is.
+			HeatBands: HeatBands{Polar: -0.6, Cold: -0.2, Temperate: 0.2, Warm: 0.6},
+
+			// 670 hexes down to 83: broad enough to be geography, finer than
+			// heat because a rain shadow is smaller than a climate zone.
+			Moisture: LadderConfig{WavelengthMiles: 4000, Octaves: 4, Lacunarity: 2, Gain: 0.5},
+			// 20 hexes down to 5. Why two neighboring valleys differ.
+			MoistureVariation: LadderConfig{WavelengthMiles: 120, Octaves: 3, Lacunarity: 2, Gain: 0.5},
+
+			MoistureFieldWeight: 1,
+			MoistureBiasWeight:  0.35,
+			// Small, and deliberately so: this is the one term in either axis
+			// that varies tile to tile, and it is what turns a climate map into
+			// speckle if it is allowed to matter.
+			MoistureVariationWeight: 0.12,
+			MoistureContrastPasses:  1,
+
+			MoistureBands: MoistureBands{Arid: -0.6, Dry: -0.2, Moderate: 0.2, Humid: 0.6},
+		},
+
 		MacroRegionSizeHexes: 512,
 		RegionSizeHexes:      128,
 		ChunkSizeHexes:       32,
@@ -342,6 +452,9 @@ func (c Config) Validate() error {
 		{"Detail", c.Detail},
 		{"Warp", c.Warp},
 		{"Elevation.Ridge", c.Elevation.Ridge},
+		{"Climate.Heat", c.Climate.Heat},
+		{"Climate.Moisture", c.Climate.Moisture},
+		{"Climate.MoistureVariation", c.Climate.MoistureVariation},
 	} {
 		if err := f.ladder.validate(f.name); err != nil {
 			return err
@@ -392,6 +505,10 @@ func (c Config) Validate() error {
 	}
 
 	if err := c.Elevation.validate(); err != nil {
+		return err
+	}
+
+	if err := c.Climate.validate(); err != nil {
 		return err
 	}
 
@@ -509,6 +626,96 @@ func (b ElevationBands) validate() error {
 		if f.value <= f.floor {
 			return &ConfigError{Field: f.name, Value: f.value, Below: f.below, Err: ErrNotAscending}
 		}
+	}
+	return nil
+}
+
+// validate reports the first reason the climate configuration cannot be used.
+//
+// The three ladders are checked with the others in Config.Validate, so what is
+// left here is the weights, the cooling, the pass counts, and the two band
+// ladders.
+func (cc ClimateConfig) validate() error {
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Climate.HeatFieldWeight", cc.HeatFieldWeight},
+		{"Climate.HeatBiasWeight", cc.HeatBiasWeight},
+		{"Climate.MoistureFieldWeight", cc.MoistureFieldWeight},
+		{"Climate.MoistureBiasWeight", cc.MoistureBiasWeight},
+		{"Climate.MoistureVariationWeight", cc.MoistureVariationWeight},
+	} {
+		if !isFinite(f.value) {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotFinite}
+		}
+		// Positive rather than merely non-negative, for the reason the
+		// elevation weights are: a weight of zero silences a term whose field
+		// is still evaluated for every tile in the world, and the setting that
+		// means "do not read this" is the wavelength rather than this.
+		if f.value <= 0 {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotPositive}
+		}
+	}
+
+	// Zero cooling is a world with no lapse rate, which is a legitimate setting
+	// rather than a missing one, so this is bounded below by zero rather than
+	// by positivity.
+	if err := checkUnit("Climate.ElevationCooling", cc.ElevationCooling); err != nil {
+		return err
+	}
+
+	for _, f := range []struct {
+		name  string
+		value uint8
+	}{
+		{"Climate.HeatContrastPasses", cc.HeatContrastPasses},
+		{"Climate.MoistureContrastPasses", cc.MoistureContrastPasses},
+	} {
+		if f.value > MaxContrastPasses {
+			return &ConfigError{
+				Field: f.name, Value: float64(f.value),
+				Lo: 0, Hi: float64(MaxContrastPasses), Err: ErrPassCount,
+			}
+		}
+	}
+
+	if err := checkBandLadder("Climate.HeatBands", []string{"Polar", "Cold", "Temperate", "Warm"},
+		[]float64{cc.HeatBands.Polar, cc.HeatBands.Cold, cc.HeatBands.Temperate, cc.HeatBands.Warm}); err != nil {
+		return err
+	}
+	return checkBandLadder("Climate.MoistureBands", []string{"Arid", "Dry", "Moderate", "Humid"},
+		[]float64{cc.MoistureBands.Arid, cc.MoistureBands.Dry, cc.MoistureBands.Moderate, cc.MoistureBands.Humid})
+}
+
+// checkBandLadder rejects a climate band ladder that does not strictly ascend
+// inside the open interval (-1, +1).
+//
+// The interval is open at both ends because the scalar it cuts is clamped to
+// [-1, +1]: a threshold at -1 would leave the bottom band reachable only by a
+// value that had saturated, and one at +1 would make the top band unreachable
+// altogether. Each is a band that can never be reached in any ordinary way,
+// which is the defect ErrNotAscending and this bound exist for — and the one
+// that the distribution test of DESIGN.md 30.8 would otherwise be the only
+// thing to catch.
+//
+// Unlike the elevation ladder there is no threshold fixed by construction here.
+// Elevation has sea level at zero whatever SeaLevel is set to; heat has no such
+// anchor, so all four entries are free and all four are checked the same way.
+func checkBandLadder(prefix string, names []string, values []float64) error {
+	floor, below := -1.0, "-1"
+	for i, v := range values {
+		name := prefix + "." + names[i]
+		if !isFinite(v) {
+			return &ConfigError{Field: name, Value: v, Err: ErrNotFinite}
+		}
+		if v >= 1 {
+			return &ConfigError{Field: name, Value: v, Lo: -1, Hi: 1, Err: ErrOutOfRange}
+		}
+		if v <= floor {
+			return &ConfigError{Field: name, Value: v, Below: below, Err: ErrNotAscending}
+		}
+		floor, below = v, name
 	}
 	return nil
 }

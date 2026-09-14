@@ -145,6 +145,12 @@ func (b ElevationBands) Classify(e float64) Elevation {
 // the number would eventually disagree with the number, and the disagreement
 // would be invisible.
 type elevationParts struct {
+	// pos is the coordinate's position in canonical world space. It is carried
+	// out because the climate composite samples its own fields at the same
+	// position, and a second AxialToWorld would be a second place for the
+	// embedding to be applied.
+	pos Vec2
+
 	// The four continuous scales at this coordinate, in the order Scales
 	// returns them. They are carried out rather than re-sampled because Sample
 	// reports them beside the composite, and DESIGN.md 4.3 says a Sample is one
@@ -209,6 +215,7 @@ func (g *Generator) elevationAt(c Coord) elevationParts {
 
 	// The four continuous scales, in the fixed order Scales returns them.
 	var parts elevationParts
+	parts.pos = p
 	parts.region = region
 	for i := range parts.scales {
 		parts.scales[i] = g.scales[i].Sample(p.X, p.Y)

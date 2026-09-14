@@ -109,3 +109,38 @@ var UnitRamp = Ramp{
 	{At: 0.70, Color: color.RGBA{R: 0xc0, G: 0x9a, B: 0x54, A: 0xff}},
 	{At: 1.00, Color: color.RGBA{R: 0xfb, G: 0xf3, B: 0xdc, A: 0xff}},
 }
+
+// TemperatureRamp is the diagnostic ramp for the heat scalar of DESIGN.md 16,
+// which runs -1 polar to +1 hot.
+//
+// It is its own ramp rather than SignedRamp because a temperature has a
+// convention and a reader brings it to the picture: cold is blue and hot is
+// red, and a scale that put brown at the hot end and navy at the cold one —
+// which is what SignedRamp does — would be read as the right answer by accident
+// and the wrong one wherever the convention is what somebody is relying on.
+//
+// The midpoint is close to neutral, so the middle of the temperate band reads
+// as the middle of the scale rather than as a color of its own.
+var TemperatureRamp = Ramp{
+	{At: 0.00, Color: color.RGBA{R: 0x16, G: 0x2c, B: 0x63, A: 0xff}},
+	{At: 0.25, Color: color.RGBA{R: 0x4d, G: 0x8f, B: 0xc4, A: 0xff}},
+	{At: 0.50, Color: color.RGBA{R: 0xf0, G: 0xea, B: 0xdc, A: 0xff}},
+	{At: 0.75, Color: color.RGBA{R: 0xdd, G: 0x8b, B: 0x3a, A: 0xff}},
+	{At: 1.00, Color: color.RGBA{R: 0x8c, G: 0x1f, B: 0x1a, A: 0xff}},
+}
+
+// MoistureRamp is the diagnostic ramp for the moisture scalar of DESIGN.md 16,
+// which runs -1 arid to +1 saturated.
+//
+// It runs desert ochre through neutral to deep green, which is the other
+// convention a reader brings. It is deliberately *not* the temperature ramp
+// with different stops: the two axes are independent and are read side by side,
+// and two pictures in the same colors invite somebody to compare them as though
+// they were one quantity. See DESIGN.md 16.1.
+var MoistureRamp = Ramp{
+	{At: 0.00, Color: color.RGBA{R: 0x8a, G: 0x67, B: 0x24, A: 0xff}},
+	{At: 0.25, Color: color.RGBA{R: 0xd2, G: 0xb1, B: 0x6a, A: 0xff}},
+	{At: 0.50, Color: color.RGBA{R: 0xef, G: 0xec, B: 0xe0, A: 0xff}},
+	{At: 0.75, Color: color.RGBA{R: 0x5a, G: 0x9e, B: 0x86, A: 0xff}},
+	{At: 1.00, Color: color.RGBA{R: 0x10, G: 0x3f, B: 0x45, A: 0xff}},
+}

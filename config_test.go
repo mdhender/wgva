@@ -145,6 +145,41 @@ func TestConfigValidation(t *testing.T) {
 			func(c *Config) { c.Elevation.Bands.Mountain = 1.5 }},
 		{"a ridge ladder below Nyquist", "Elevation.Ridge.WavelengthMiles", ErrBelowNyquist,
 			func(c *Config) { c.Elevation.Ridge.WavelengthMiles = 1 }},
+
+		// The two climate axes. Every weight is positive, the cooling is
+		// normalized, and each band ladder ascends strictly inside (-1, +1).
+		{"a heat ladder below Nyquist", "Climate.Heat.WavelengthMiles", ErrBelowNyquist,
+			func(c *Config) { c.Climate.Heat.WavelengthMiles = 1 }},
+		{"a moisture variation ladder with no octaves", "Climate.MoistureVariation.Octaves", ErrOctaveCount,
+			func(c *Config) { c.Climate.MoistureVariation.Octaves = 0 }},
+		{"a silenced heat field", "Climate.HeatFieldWeight", ErrNotPositive,
+			func(c *Config) { c.Climate.HeatFieldWeight = 0 }},
+		{"a silenced moisture variation", "Climate.MoistureVariationWeight", ErrNotPositive,
+			func(c *Config) { c.Climate.MoistureVariationWeight = 0 }},
+		{"a heat bias weight that is not finite", "Climate.HeatBiasWeight", ErrNotFinite,
+			func(c *Config) { c.Climate.HeatBiasWeight = math.Inf(1) }},
+		{"cooling above one", "Climate.ElevationCooling", ErrOutOfRange,
+			func(c *Config) { c.Climate.ElevationCooling = 1.5 }},
+		{"cooling below zero", "Climate.ElevationCooling", ErrOutOfRange,
+			func(c *Config) { c.Climate.ElevationCooling = -0.1 }},
+		{"too many heat contrast passes", "Climate.HeatContrastPasses", ErrPassCount,
+			func(c *Config) { c.Climate.HeatContrastPasses = MaxContrastPasses + 1 }},
+		{"too many moisture contrast passes", "Climate.MoistureContrastPasses", ErrPassCount,
+			func(c *Config) { c.Climate.MoistureContrastPasses = MaxContrastPasses + 1 }},
+		// The scalar is clamped to [-1, +1], so a threshold at either end is a
+		// band reachable only by a value that saturated, or not at all.
+		{"a heat band at the floor", "Climate.HeatBands.Polar", ErrNotAscending,
+			func(c *Config) { c.Climate.HeatBands.Polar = -1 }},
+		{"a heat band at the ceiling", "Climate.HeatBands.Warm", ErrOutOfRange,
+			func(c *Config) { c.Climate.HeatBands.Warm = 1 }},
+		{"heat bands out of order", "Climate.HeatBands.Temperate", ErrNotAscending,
+			func(c *Config) { c.Climate.HeatBands.Temperate = c.Climate.HeatBands.Cold }},
+		{"a heat band that is not finite", "Climate.HeatBands.Cold", ErrNotFinite,
+			func(c *Config) { c.Climate.HeatBands.Cold = math.NaN() }},
+		{"moisture bands out of order", "Climate.MoistureBands.Humid", ErrNotAscending,
+			func(c *Config) { c.Climate.MoistureBands.Humid = c.Climate.MoistureBands.Moderate }},
+		{"a moisture band above the ceiling", "Climate.MoistureBands.Arid", ErrOutOfRange,
+			func(c *Config) { c.Climate.MoistureBands.Arid = 1.5 }},
 	}
 
 	for _, tc := range cases {
@@ -191,8 +226,16 @@ func TestValidConfigurations(t *testing.T) {
 		"no ridge stride": func(c *Config) { c.Elevation.RidgeStrideMiles = 0 },
 		// And a ridge term worth nothing is a world without mountain belts,
 		// which is a choice.
-		"no ridges":     func(c *Config) { c.Elevation.RidgeWeight = 0 },
-		"gain of one":   func(c *Config) { c.Detail.Gain = 1 },
+		"no ridges":   func(c *Config) { c.Elevation.RidgeWeight = 0 },
+		"gain of one": func(c *Config) { c.Detail.Gain = 1 },
+		// A world with no lapse rate is a world whose mountains are as warm as
+		// the ground around them, which is a choice rather than an omission.
+		"no elevation cooling": func(c *Config) { c.Climate.ElevationCooling = 0 },
+		// And zero passes is the identity on either climate axis, the same way
+		// it is on the elevation composite.
+		"no climate contrast": func(c *Config) {
+			c.Climate.HeatContrastPasses, c.Climate.MoistureContrastPasses = 0, 0
+		},
 		"polar ice rim": func(c *Config) { c.Rim.Kind = RimPolarIce },
 		// DESIGN.md 15.1: the unrimmed world must stay a valid configuration,
 		// because it is how the wrap tests see the seam they assert on.

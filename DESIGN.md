@@ -3969,3 +3969,114 @@ continental blobs faster than the contrast pass can close them. The fine weights
 came down with it for the same reason, on the coast rather than in the interior.
 
 *Phase 4.*
+
+### D.12 The climate composite, written out
+
+Section 16 gives temperature and moisture as sums of three terms each and
+section 16.1 gives the two band ladders. It does not say how the terms are
+weighted, where the broad zones come from in a world with no equator, or what
+"elevation cooling" reads. This is what phase 5 settled.
+
+```text
+heatBase     = (wHF*heatField + wHB*regionHeatBias) / (wHF + wHB)
+cooling      = elevationCooling * max(elevation, 0)
+heat         = clamp(contrast(heatBase, heatPasses) - cooling)
+
+moistureBase = (wMF*moistureField + wMB*regionMoistureBias + wMV*variation) / (wMF + wMB + wMV)
+moisture     = clamp(contrast(moistureBase, moisturePasses))
+```
+
+Both scalars run `-1` to `+1`, with zero the middle of the temperate and
+moderate bands. That is the elevation scalar's convention without the elevation
+scalar's anchor: sea level is zero *by construction*, and the middle of the
+temperate band is zero only because the band ladder says so. All four
+thresholds on each axis are therefore free, and validation checks all four the
+same way — strictly ascending, strictly inside `(-1, +1)`, since the scalar is
+clamped and a threshold at either end is a band nothing ordinary can reach.
+
+Four decisions in that, each of which could have gone another way:
+
+- **The broad zones are a field, not a latitude.** The wrapped world has no
+  equator and `r == 0` is an addressing origin, so a latitude term would be a
+  promise the topology does not make — which is the same argument section 15.1
+  makes against a polar ice rim, reached from the other end. Nothing in the
+  composite reads a coordinate component. The heat ladder is twice the
+  continental wavelength, so a zone is larger than a continent, which is what a
+  latitude band would have been if the world had one.
+- **Each base is a weighted average and then a contrast pass.** The average is
+  what keeps the base inside `[-1, +1]` whatever the weights are; the pass is
+  what decides how much of that range the world actually uses. Without it a sum
+  of fields that are each concentrated about zero puts almost everything in the
+  middle band, which is a climate map of one color and five bands of which three
+  are unreachable. It is the same S-curve the elevation composite uses on its
+  coarse half, and `ErrPassCount` already existed for it.
+- **Cooling reads `max(elevation, 0)`, not `elevation`.** Below sea level the
+  scalar is depth rather than altitude and depth has no lapse rate; a linear
+  term would warm the deep ocean in proportion to how deep it was. The defect is
+  invisible in a heat map — the ocean is a broad smooth field either way — which
+  is why it is pinned by a test rather than left to review.
+- **Cooling is subtracted after the contrast pass, not before.** The pass shapes
+  the zones and the lapse rate is a physical offset on top of whichever zone a
+  tile stands in. Running the sum back through the S-curve would make a
+  mountain's temperature depend on its zone twice over, and would flatten the
+  lapse rate exactly where it is steepest.
+
+**Basin influence is absent, and differently absent from elevation's.** Section
+17.1 puts it in a *product* with moisture inside terrain, so it multiplies what
+this returns rather than joining it. There is nothing here for phase 6 to add.
+
+*Phase 5.*
+
+### D.13 What the climate defaults were tuned to
+
+Appendix D.11 for the two climate axes. Over 20,000 coordinates at each of four
+seeds, under the shipped defaults:
+
+| | | | | |
+|---|---:|---|---:|---|
+| polar | 0.10 | | arid | 0.04 |
+| cold | 0.28 | | dry | 0.27 |
+| temperate | 0.32 | | moderate | 0.38 |
+| warm | 0.24 | | humid | 0.27 |
+| hot | 0.06 | | saturated | 0.04 |
+
+| | |
+|---|---:|
+| median neighbor step, heat | 0.003 |
+| median neighbor step, moisture | 0.010 |
+| median neighbor step, elevation, for comparison | 0.011 |
+| correlation, heat against moisture | ±0.008 |
+| correlation, heat against elevation | -0.20 |
+| mean heat on land | -0.16 |
+| mean heat at sea | ±0.008 |
+
+Four of those are the phase's exit condition and its three rules, measured:
+
+- **The neighbor steps are the exit condition.** Climate maps form coherent
+  broad zones rather than tile-level speckle, and "speckle" is a statement about
+  the step between adjacent tiles. A band is 0.4 wide, so a median step of 0.003
+  is well over a hundred tiles to cross a heat band and forty to cross a
+  moisture one. Moisture steps three times faster than heat because it is the
+  only axis with a local variation term, and it still steps slightly *less* than
+  elevation does — which is the shape the model wants, since elevation has a
+  detail scale at the grid's Nyquist limit and climate deliberately has nothing
+  finer than tens of miles.
+- **Heat against moisture is nothing**, which is section 16.1's independence
+  measured rather than asserted. It is not what would catch the two fields
+  sharing a hashing domain — at wavelengths a factor of thirty apart, two nodes
+  on one gradient table still produce unrelated values — and the test that says
+  so says so.
+- **Heat against elevation is -0.20, and the sea is exactly unaffected.** That
+  is the lapse rate and only the lapse rate: the mean heat at sea sits at the
+  world mean to three decimal places at every seed, because `max(elevation, 0)`
+  is zero for every water tile, while land sits 0.16 below it.
+
+The histograms are what the thresholds were placed against, and they are even
+fifths of the range on both axes rather than numbers tuned per band. The heat
+ladder comes out slightly cool-heavy — the cooling term only ever subtracts — and
+that is the lapse rate showing up in a histogram rather than a threshold wanting
+to move. As in D.11 the distribution test bounds this loosely on purpose: it
+asserts that every band is reachable and none swallows the world, which is a
+test of the thresholds rather than of the tuning.
+
+*Phase 5.*

@@ -59,4 +59,12 @@ const WorldRadius int64 = 32767
 //	   closed at both ends, so no version 2 configuration can be read. No value
 //	   this version already produced moved: the four scales and the region blend
 //	   are untouched, and their golden tables stand.
-const AlgorithmVersion uint32 = 3
+//	4  Climate. The two independent axes of DESIGN.md 16 — the broad heat zone
+//	   field with its regional bias and its elevation lapse rate, the broad
+//	   moisture field with its regional bias and its local variation, and the
+//	   two band ladders that cut them — under three new hashing domains that
+//	   were already reserved. Config gained ClimateConfig, so no version 3
+//	   configuration can be read. No value this version already produced moved:
+//	   climate reads the elevation composite and nothing reads climate, so the
+//	   scale, region, and elevation golden tables stand.
+const AlgorithmVersion uint32 = 4
