@@ -4,11 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-**Phase 1 has landed.** The root `wgva` package carries coordinates, the
-wraparound normalizer, hashing, and the `Config`/`Generator` skeleton, and
+**Phases 1 and 2 have landed.** The root `wgva` package carries coordinates, the
+wraparound normalizer, hashing, the owned noise, the `Field` composition tree
+with fbm and domain warping, and the `Config`/`Generator` skeleton;
 `internal/mathx` carries the floor helpers, `Mul`, and the exact 128-bit
-arithmetic. Nothing else in the layout below exists yet — no fields, no noise, no
-`render`, `config`, `view`, `store`, or `cmd`.
+arithmetic. Around it, `config` owns the canonical CBOR, the fingerprint, and
+the TOML file; `render` owns the viewport, the layers, and the two renders;
+`view` owns the window grammar; and `cmd/wgva-tune` is the terrain tuning tool.
+
+What does not exist yet is everything from phase 3 on: regions, elevation,
+climate, basins, terrain, the rim profile, and every `store` or player-facing
+thing. Thirteen of the seventeen layers `DESIGN.md` 29 lists arrive with the
+phases that compute them, and `config/fingerprint_test.go` deliberately does not
+yet carry the written-down fingerprint constant — writing it down is what
+*settles* the defaults, and phase 7 is where that decision belongs.
 
 `DESIGN.md` is the specification and `AGENTS.md` is the working guidance, and
 both are still well ahead of the code. Treat a disagreement between them and the

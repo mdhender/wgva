@@ -1,0 +1,64 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wgva-tune — {{.Tab}} — {{.SeedText}}</title>
+<style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #16181c; color: #d8dade; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+header { padding: 12px 18px; background: #0f1114; border-bottom: 1px solid #2a2e35; }
+h1 { font-size: 15px; margin: 0 0 6px; font-weight: 600; letter-spacing: 0.02em; }
+h2 { font-size: 13px; margin: 18px 0 6px; color: #9aa1ab; text-transform: uppercase; letter-spacing: 0.08em; }
+main { padding: 18px; display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.panel { min-width: 280px; max-width: 420px; flex: 0 0 auto; }
+.picture { flex: 1 1 520px; min-width: 320px; }
+a { color: #7fb4e8; }
+a.current { color: #f0c674; font-weight: 700; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.identity { display: flex; gap: 22px; flex-wrap: wrap; font-size: 12px; color: #9aa1ab; }
+.identity b { color: #d8dade; font-weight: 600; }
+.label-default { color: #86c27a; font-weight: 700; }
+.label-modified { color: #f0c674; font-weight: 700; }
+.caveat { margin: 6px 0 0; font-size: 12px; color: #7c828c; max-width: 80ch; }
+.warning { margin: 10px 0; padding: 8px 10px; border-left: 3px solid #f0c674; background: #201d15; font-size: 12px; max-width: 80ch; }
+.notice { margin: 10px 0; padding: 8px 10px; border-left: 3px solid #86c27a; background: #16201a; font-size: 12px; }
+.failure { margin: 10px 0; padding: 8px 10px; border-left: 3px solid #e08c7a; background: #221816; font-size: 12px; }
+img { image-rendering: pixelated; border: 1px solid #2a2e35; background: #0f1114; max-width: 100%; }
+pre { background: #0f1114; border: 1px solid #2a2e35; padding: 10px; overflow-x: auto; font-size: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+td, th { padding: 3px 6px; text-align: left; vertical-align: top; }
+tr.moved td { background: #201d15; }
+input[type=text], select { background: #0f1114; color: #d8dade; border: 1px solid #2a2e35; padding: 3px 5px; font: inherit; width: 14ch; }
+input[type=submit], button { background: #23272e; color: #d8dade; border: 1px solid #3a3f48; padding: 4px 10px; font: inherit; cursor: pointer; }
+fieldset { border: 1px solid #2a2e35; margin: 0 0 14px; padding: 10px 12px; }
+legend { color: #9aa1ab; text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; }
+.doc { color: #7c828c; }
+nav a { margin-right: 14px; }
+</style>
+</head>
+<body>
+<header>
+<h1>the terrain tuning tool — it runs on a developer's machine and produces a settings file; nothing is deployed and no player ever touches it</h1>
+<div class="identity">
+  <span>seed <b>{{.SeedText}}</b></span>
+  <span>build <b>{{.Build}}</b></span>
+  <span>algorithm version <b>{{.AlgorithmVersion}}</b></span>
+  <span>world radius <b>{{.WorldRadius}}</b></span>
+  <span>configuration <b title="{{.Fingerprint}}">{{.FingerprintShort}}</b>
+    {{if .IsDefault}}<span class="label-default">{{.Label}}</span>{{else}}<span class="label-modified">{{.Label}}</span>{{end}}</span>
+</div>
+<nav style="margin-top:10px">
+  {{range .Tabs}}<a href="{{.URL}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}
+  <a href="/config.toml">download config.toml</a>
+</nav>
+<p class="caveat">This tool is stateful, and that is the one thing it cannot share with the map viewer:
+a link to a window shows what this process is drawing <em>now</em>, not what it drew when the link was copied.
+What it keeps is the fingerprint — the download turns the configuration behind this picture back into a file.
+This tool cannot open, create, or write a world; it has no import path to the store package and a test says so.</p>
+</header>
+<main>
+{{block "body" .}}{{end}}
+</main>
+</body>
+</html>{{end}}

@@ -1,0 +1,47 @@
+{{define "controls"}}
+<h2>layer</h2>
+<div class="row">{{range .Layers}}<a href="{{.URL}}" title="{{.Title}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}</div>
+{{if .LayerDoc}}<p class="doc">{{.LayerDoc}}</p>{{end}}
+
+<h2>move — the compass runs clockwise from north</h2>
+<div class="row">{{range .Scroll}}<a href="{{.URL}}" title="{{.Title}}">{{.Label}}</a>{{end}}</div>
+
+<h2>window</h2>
+<div class="row">{{range .Size}}<a href="{{.URL}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}</div>
+<div class="row">{{range .Zoom}}<a href="{{.URL}}">{{.Label}}</a>{{end}}</div>
+
+<h2>turn</h2>
+<div class="row">{{range .Turns}}<a href="{{.URL}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}</div>
+
+<h2>go to</h2>
+<form method="get" action="">
+  <input type="hidden" name="layer" value="{{.View.Layer}}">
+  <input type="hidden" name="cols" value="{{.View.Cols}}">
+  <input type="hidden" name="rows" value="{{.View.Rows}}">
+  <input type="hidden" name="turn" value="{{.View.Turn}}">
+  <input type="hidden" name="hex-radius" value="{{.View.HexRadius}}">
+  <input type="hidden" name="scale" value="{{.View.Scale}}">
+  <input type="hidden" name="stride" value="{{.View.Stride}}">
+  q <input type="text" name="q" value="{{.View.Q}}">
+  r <input type="text" name="r" value="{{.View.R}}">
+  <input type="submit" value="go">
+</form>
+<form method="get" action="/" style="margin-top:8px">
+  <input type="hidden" name="tab" value="{{.Tab}}">
+  seed <input type="text" name="seed" value="{{.SeedText}}" style="width:20ch">
+  <input type="submit" value="open">
+</form>
+
+<h2>cost</h2>
+<p class="doc">{{.Evaluations}} generator evaluations, against a budget of {{.Budget}}
+({{percent .Evaluations .Budget}}%). The budget is counted in evaluations rather than tiles,
+because a tile count cannot tell a cheap window from one seven times longer.</p>
+
+<h2>what was evaluated</h2>
+<pre>{{.FieldTree}}</pre>
+
+<h2>the world this would make</h2>
+<pre>{{.CreateLine}}</pre>
+<p class="doc">Neither half of <code>--expect</code> is redundant: the fingerprint cannot see a
+generator fix nobody versioned, and the build identity cannot see a setting nudged in this process.</p>
+{{end}}

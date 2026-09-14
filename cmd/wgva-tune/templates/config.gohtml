@@ -1,0 +1,56 @@
+{{define "body"}}
+<div class="picture">
+  <h2>the complete effective configuration</h2>
+  {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+  {{if .Failure}}<p class="failure">{{.Failure}}</p>{{end}}
+  <p class="doc">Every number that decides how a world looks is here and nowhere else.
+  A highlighted row has been moved off this binary's default. An invalid configuration is refused
+  whole rather than applied field by field, so a change that would make an unusable world changes nothing.</p>
+  <form method="post" action="/seed/{{.SeedText}}/config/fields">
+    {{range .Groups}}
+    <fieldset>
+      <legend>{{.Name}}</legend>
+      <table>
+        {{range .Fields}}
+        <tr{{if .Moved}} class="moved"{{end}}>
+          <td style="width:26ch"><label for="{{.Key}}">{{.Key}}</label></td>
+          <td style="width:18ch">
+            {{if .Choices}}
+              <select id="{{.Key}}" name="{{.Key}}">
+                {{$v := .Value}}{{range .Choices}}<option value="{{.}}"{{if eq . $v}} selected{{end}}>{{.}}</option>{{end}}
+              </select>
+            {{else}}
+              <input type="text" id="{{.Key}}" name="{{.Key}}" value="{{.Value}}">
+            {{end}}
+          </td>
+          <td class="doc">{{.Doc}}{{if .Moved}} — default {{.Default}}{{end}}</td>
+        </tr>
+        {{end}}
+      </table>
+    </fieldset>
+    {{end}}
+    <input type="submit" value="apply">
+  </form>
+</div>
+<div class="panel">
+  <h2>adopt a file</h2>
+  <form method="post" action="/seed/{{.SeedText}}/config/upload" enctype="multipart/form-data">
+    <p><input type="file" name="file" accept=".toml,text/plain"></p>
+    <p class="doc">or paste one:</p>
+    <p><textarea name="contents" rows="10" style="width:100%; background:#0f1114; color:#d8dade; border:1px solid #2a2e35; font:inherit"></textarea></p>
+    <p><input type="submit" value="adopt"></p>
+  </form>
+  <p class="doc">A file with an unknown key is refused, and so is a file missing one.
+  A missing key is never a zero value: a file without <code>sea_level</code> would otherwise
+  decode to sea level 0.0 and generate a different world under an unchanged version number.</p>
+
+  <h2>back to the defaults</h2>
+  <form method="post" action="/seed/{{.SeedText}}/config/reset">
+    <input type="submit" value="reset">
+  </form>
+
+  <h2>the world this would make</h2>
+  <pre>{{.CreateLine}}</pre>
+</div>
+{{end}}
+{{template "layout" .}}

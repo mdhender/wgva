@@ -1,0 +1,21 @@
+{{define "body"}}
+<div class="picture">
+  <h2>grid — {{.View.Cols}} × {{.View.Rows}} cells at ({{.View.Q}}, {{.View.R}}), 1:{{.View.Stride}}, turn {{.View.Turn}}</h2>
+  {{if .Warning}}<p class="warning">{{.Warning}}</p>{{end}}
+  <img src="{{.ImageURL}}" alt="the {{.View.Layer}} layer at one pixel per hex">
+  <p class="doc">One pixel per hex, or {{.View.Scale}}, so a million tiles can be looked at in one image.
+  What it distorts: a hex row's centers are √3·r apart and a column's are 1.5·r, so drawing both as one
+  pixel stretches this picture vertically by about fifteen percent and flattens the half-hex column stagger.
+  That is the price of the view.</p>
+  <h2>sampling</h2>
+  <div class="row">{{range .Strides}}<a href="{{.URL}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}</div>
+  <p class="doc">One cell per <em>n</em> hexes. The world is 65,535 hexes across, so a wide window at a
+  coarse sampling is how all of it fits in one image.</p>
+  <p class="doc">A stride is point sampling, not averaging, so a stride coarser than the layer's
+  finest octave aliases it and the picture becomes speckle. That is the Nyquist argument of the octave
+  ladder seen from the other end. Keep the stride's wavelength — six miles times the stride — above the
+  ladder's shortest octave, or move to a coarser layer.</p>
+</div>
+<div class="panel">{{template "controls" .}}</div>
+{{end}}
+{{template "layout" .}}

@@ -1,0 +1,10 @@
+{{define "body"}}
+<div class="picture">
+  <h2>map — {{.View.Cols}} × {{.View.Rows}} hexes at ({{.View.Q}}, {{.View.R}}), turn {{.View.Turn}}</h2>
+  <img src="{{.ImageURL}}" alt="the {{.View.Layer}} layer">
+  <p class="doc">Drawn as the viewer draws it: flat-top hexes, image y downward, no rotation,
+  which puts absolute direction 2 at the top of the image.</p>
+</div>
+<div class="panel">{{template "controls" .}}</div>
+{{end}}
+{{template "layout" .}}
