@@ -2165,14 +2165,15 @@ a query string.
 
 What it gives up is real and is named on every page: a link to a window shows what that process is drawing *now*, not what it drew when the link was copied. What it keeps is the fingerprint. Every tab prints it, the download turns the configuration behind it back into a file, and `wgva-map --config` draws that file — so a picture can always be traced to the configuration that produced it and reproduced outside the tool.
 
-**A fingerprint is not enough on its own, because comparing two hashes by eye is
-a thing nobody does.** Section 21.2 makes the default configuration's
-fingerprint a written-down constant, so the tool knows that value and must say
-which side of it the session is on: every tab labels the configuration either as
-**this binary's defaults** or as **modified**, conspicuously, beside the
-fingerprint. Section 29.5 is why that label earns its place — it is the one
-thing standing between an administrator and a world that is not the one they
-chose.
+**Print the algorithm version beside the fingerprint, and label the
+configuration.** Section 21.2 makes the default configuration's fingerprint a
+written-down constant, so the tool knows that value and can say which side of it
+the session is on: every tab labels the configuration as **this binary's
+defaults** or as **modified**, conspicuously, beside the fingerprint and the
+version. The label tells a reader whether anyone has touched the form; the
+fingerprint and version together tell them *which build they are looking at*,
+which is the half that matters to somebody sampling seeds to create a world
+from. Section 29.5 is why.
 
 #### The grid
 
@@ -2360,38 +2361,60 @@ the descriptions and one step of it was discovered rather than designed.
   is to create a database per candidate seed, render a window, look, and clean
   up.
 
+**The administrator never supplies a configuration**, and this is a fact about
+the system rather than a convention she is asked to observe: the only way a
+configuration reaches a running binary is for a developer to make it the
+built-in defaults and commit it, which is step 3 below. She has no path to
+change what the code uses. So every window she looks at and every world she
+creates is drawn under this binary's defaults, and the question "which
+configuration was that?" has exactly one answer for her.
+
 The tool suits the second job by accident, and the accident is worth keeping:
 the seed is a route segment, so sampling seeds is pure navigation with a working
 back button, a promising seed is a link somebody can paste into an issue, and
 the grid tab shows a whole continental arrangement in one image rather than a
 viewport at a time.
 
-#### The trap, and the label that closes it
+#### The trap is build skew, not a touched form
 
-The configuration is the one thing *not* in the URL, and section 29.1 says so
-plainly: a link shows what that process is drawing **now**, not what it drew
-when the link was copied. So an administrator who samples seeds in a session
-where anyone has touched the configuration form is judging worlds under a
-configuration that exists nowhere but that process's memory. Create a world from
-the shipped defaults afterwards and the seed is right and the map is different.
+Because the administrator cannot supply a configuration, the obvious hazard —
+sampling seeds under a configuration somebody had edited in the form — is not
+really hers. It is an accident she has no reason to have, and the label below
+catches it.
 
-**Nothing errors**, which is what makes this worth a paragraph rather than a
-sentence: every value involved is valid, every gate passes, and the world is
-reproducible — just not the one that was chosen.
+The hazard that *is* hers is the same shape one level up. **A seed only names a
+world together with the build that drew it.** Sampling happens in `wgva-tune`
+and creating happens in `wgva-world`, and nothing makes those two the same
+binary. During alpha the defaults move whenever tuning improves — that is what
+step 3 is — so a seed chosen on Tuesday's build and created on Thursday's is a
+different world at the same number.
 
-Two cheap things close it, and both are already implied by what the design
+**Nothing errors**, which is what makes it worth a paragraph rather than a
+sentence: the seed is valid, the configuration is valid, every gate in section
+27.5 passes, and the world is perfectly reproducible. It is simply not the one
+that was chosen, and the only evidence is that the map looks different from the
+one in the browser tab — which by then is closed.
+
+Three cheap things address it, all of them already implied by what the design
 stores:
 
-1. **The tuning tool labels its configuration as this binary's defaults or as
-   modified**, on every tab, against the written-down constant of section 21.2.
-   Comparing two fingerprints by eye is a thing nobody actually does; reading one
-   word is.
-2. **`wgva-world create` prints the fingerprint it wrote**, so it can be matched
-   against what the browser showed before anybody plays on it.
+1. **The tuning tool prints the configuration fingerprint and the algorithm
+   version on every tab**, and labels the configuration as this binary's
+   defaults or as modified, against the written-down constant of section 21.2.
+   The label catches the accident; the fingerprint catches the skew.
+2. **What the administrator carries from step 4 to step 5 is a seed *and* a
+   fingerprint**, not a seed. That is the smallest unit that names a world.
+3. **`wgva-world create` prints the fingerprint and version it wrote**, so the
+   pair can be compared before anybody plays on the result.
+
+That leaves the comparison to a person, which is the weakest of the three. If it
+proves insufficient in practice, the enforcement is one flag and one equality
+test — `wgva-world create --expect <fingerprint>`, refusing on mismatch — and it
+converts a silently different world into a refusal that names both values. Do
+not add it before the printed pair has been given a chance to be enough.
 
 An administrator sampling seeds never needs the `POST` routes at all, so a
-session started for that purpose can reasonably refuse them — but the label is
-the load-bearing half and the refusal is only a convenience.
+session started for that purpose can reasonably refuse them.
 
 #### The walkthrough
 
@@ -2409,11 +2432,13 @@ the load-bearing half and the refusal is only a convenience.
 4. **Sample seeds.** Administrator, still no database. `wgva-tune`, confirm the
    page says *defaults*, then walk seeds in the grid tab until a world looks
    worth playing on. Keep the link.
-5. **Create the world.** `wgva-world create --seed <hex> world.wgva`. Writes the
-   seed, algorithm version, component width, complete effective configuration,
-   and fingerprint before anything else; refuses a file that already exists;
-   prints the fingerprint. This is the only moment a world file comes into
-   existence.
+5. **Create the world.** `wgva-world create --seed <hex> world.wgva`, with no
+   configuration argument — the binary's defaults are the only configuration she
+   has. Writes the seed, algorithm version, component width, complete effective
+   configuration, and fingerprint before anything else; refuses a file that
+   already exists; prints the fingerprint and version. **Check that pair against
+   what step 4 showed**, because this is the step where build skew becomes a
+   world. This is the only moment a world file comes into existence.
 6. **Look at it.** `wgva-serve --db world.wgva` for the viewer, `wgva-map --db
    world.wgva …` for an image file. Both open; neither writes.
 7. **Change your mind.** During alpha, do not migrate: delete the file and
@@ -2441,9 +2466,14 @@ wgva-world create --seed 0123456789abcdef [--config config.toml] world.wgva
   rather than `wgva-map --seed`'s decimal. A world is created once, and the seed
   is copied out of a browser when it happens, so this is the spelling that
   matters here.
-- `--config` is optional and defaults to the binary's built-in defaults, because
-  after step 3 that is the ordinary case. When given, the file's fingerprint is
-  recomputed rather than trusted from its comment header, and printed either way.
+- `--config` is **a developer affordance and is not part of the administrator's
+  path.** Creation defaults to the binary's built-in defaults, which after step 3
+  is the only configuration an administrator has. The flag exists so that a
+  candidate configuration can be given a world before it is shipped — chiefly to
+  exercise the gates of section 27.5 in a test. When given, the file's
+  fingerprint is recomputed rather than trusted from its comment header.
+- The fingerprint and algorithm version actually written are **printed**, with or
+  without `--config`. See the skew hazard above; this line is the whole guard.
 - The command **refuses an existing file**. There is no `--force`: removing a
   world is something a person does deliberately, with `rm`.
 - It takes no viewport, no layer, and no output image, and it *cannot* —

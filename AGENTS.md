@@ -302,10 +302,18 @@ These are the rules most likely to be violated by code that looks correct.
   refuses an absent or empty file rather than initializing it. `wgva-map --db`
   reads a world's *identity* — seed, version, width, configuration — and
   regenerates; it does not read stored tiles, because there are none.
-- The tuning tool labels its configuration **defaults** or **modified** on every
-  tab, against the fingerprint constant of `DESIGN.md` 21.2. That label is what
-  keeps an administrator sampling seeds from creating a world that is not the one
-  they chose; see `DESIGN.md` 29.5.
+- The tuning tool prints the configuration fingerprint and the algorithm version
+  on every tab, and labels the configuration **defaults** or **modified** against
+  the constant of `DESIGN.md` 21.2. **A seed does not name a world; a seed plus a
+  fingerprint does.** Administrators sample seeds in the tuning tool and create
+  worlds with `wgva-world`, and nothing makes those the same build — during alpha
+  the defaults move whenever tuning improves, so the same seed on two builds is
+  two worlds and nothing errors. `wgva-world create` prints the pair it wrote for
+  exactly this comparison. See `DESIGN.md` 29.5.
+- **The administrator never supplies a configuration.** The only way one reaches
+  a running binary is a developer making it the built-in defaults and committing
+  it. `wgva-world create --config` is a developer affordance for exercising the
+  gates, not a step in her path.
 - Render coordinates in a stable sorted order; overlapping edges and labels make
   output order-dependent otherwise.
 - Keep generated terrain separate from player overlays (discoveries, fog of
