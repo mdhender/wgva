@@ -3,7 +3,7 @@
 package wgva
 
 // Seed identifies a world. Everything generated is a function of it together
-// with the algorithm version, the component width, the configuration, and the
+// with the algorithm version, the world radius, the configuration, and the
 // coordinate.
 type Seed uint64
 

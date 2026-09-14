@@ -97,7 +97,7 @@ func TestWrapIsBitExactUnderRotation(t *testing.T) {
 	}
 }
 
-// TestScrollWalkCrossesTheSeamAndRetraces is the alpha component width earning
+// TestScrollWalkCrossesTheSeamAndRetraces is the shipped world radius earning
 // its place: a walk from the origin to the rim and out the other side is a few
 // thousand steps, so the wrap is covered by a test that finishes in
 // milliseconds rather than by argument.

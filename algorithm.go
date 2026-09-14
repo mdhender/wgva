@@ -2,52 +2,40 @@
 
 package wgva
 
-import (
-	"math"
-	"math/bits"
-)
-
-// Component is the stored width of one axial coordinate component. It is the
-// single place the world's size is decided, and it is settled: int16, with no
-// migration to a wider width. DESIGN.md 4.2 carries the arithmetic — 3.2 billion
-// hexes is roughly 526 times Earth's land area at a 30% land fraction, and the
-// width is what keeps the rim reachable and the whole world drawable in one
-// image.
+// Component is the storage type for one axial coordinate component.
 //
-// The width appears in exactly two places in this module — here, paired with
-// WorldRadius, and in the compatibility tests. Nothing else may name a width,
-// and a literal 32767 anywhere else is a defect. That discipline is kept even
-// though nothing is planned to change, because it is what would make DESIGN.md
-// 4.2's 18-bit contingency a two-constant change rather than an audit.
-type Component = int16
-
-// WorldRadius is N in DESIGN.md 7.1: the radius of the canonical hexagon, and
-// the bound every component is range-checked against. It is paired with
-// Component rather than chosen independently, and at the shipped width it is
-// also the largest value a Component can hold.
+// It is deliberately wider than the canonical domain, and that is the whole
+// point: the domain is defined by WorldRadius, not by the type, so the two are
+// separate decisions. See DESIGN.md 4.2.
 //
-// Go cannot compute the maximum of a signed type in a constant expression
-// without unsafe, which DESIGN.md 22 forbids, so the pair is written out and
-// pinned by TestWorldRadiusMatchesComponent rather than derived.
-const WorldRadius int64 = math.MaxInt16
+// A wide type is also what makes a missing bound check loud. If componentOf's
+// range check were wrong or absent, narrowing 98301 to an int16 would wrap to
+// 32765 — an ordinary-looking coordinate in the wrong place. Here it stores
+// 98301, which isCanonical rejects and RimDistance reports as negative on the
+// next call.
+type Component = int32
 
-// ComponentWidthBits returns the width of a Component in bits. It is part of
-// world topology, so it is recorded in world metadata and hashed into the
-// configuration fingerprint. See DESIGN.md 4.2 and 21.2.
+// WorldRadius is N in DESIGN.md 7.1: the radius of the canonical hexagon, the
+// bound every component is range-checked against, and the single value that
+// decides the world's topology.
 //
-// It is derived from WorldRadius rather than written down, because the width is
-// one decision and naming it a third time is the defect DESIGN.md 4.2 describes.
-// A two's complement type of w bits holds a maximum of 2^(w-1) - 1, whose bit
-// length is w-1.
-func ComponentWidthBits() uint32 {
-	return uint32(bits.Len64(uint64(WorldRadius))) + 1
-}
+// It is written out rather than derived from Component's range. The type is
+// wider than this on purpose, so there is nothing to derive it from — and a
+// world radius that could be read off a type is a world radius that changes
+// when somebody changes the type. Anything that needs to identify a world's
+// topology — world metadata, the configuration fingerprint, gate 5 — records
+// this number, never a width in bits. See DESIGN.md 4.2 and 21.2.
+//
+// 32767 is the shipped radius: 3,221,127,169 tiles, about 526 times Earth's
+// land area at a 30% land fraction. DESIGN.md 4.2 carries the arithmetic and
+// the 18-bit contingency, which is a change to this constant and nothing else.
+const WorldRadius int64 = 32767
 
 // AlgorithmVersion identifies the generation algorithm. A world file records
 // it, and a binary refuses a world it cannot reproduce.
 //
 // Changing a noise formula, a hash domain, a threshold, a weight, the
-// axial-to-world embedding, the direction table, or the component width changes
+// axial-to-world embedding, the direction table, or WorldRadius changes
 // existing worlds and requires a bump. So does Config gaining a field, because
 // DESIGN.md 21.1 forbids defaulting a missing generation-affecting field: no
 // tile moves, but an older file can no longer be read. Say which kind of bump
@@ -57,5 +45,5 @@ func ComponentWidthBits() uint32 {
 //
 //	1  Initial algorithm. Coordinates, the wrapped domain, the axial-to-world
 //	   embedding, the direction table, and the domain-separated mixer. The
-//	   component width is 16 bits and is settled; DESIGN.md 4.2.
+//	   world radius is 32767; DESIGN.md 4.2.
 const AlgorithmVersion uint32 = 1

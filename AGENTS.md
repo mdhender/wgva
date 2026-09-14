@@ -101,7 +101,7 @@ Two things this does not license:
 
 ## Core invariants
 
-- Preserve `Tile = F(seed, coordinate, algorithm version, component width,
+- Preserve `Tile = F(seed, coordinate, algorithm version, world radius,
   configuration)`. Generation order, goroutine scheduling, caches, explored
   area, and persisted mutable state must not affect the generated baseline
   world.
@@ -114,7 +114,7 @@ Two things this does not license:
   No mutable PRNG in the generation path. `math/rand/v2` is permitted for
   tooling and test data only; `math/rand` v1 is forbidden everywhere.
 - Treat changes to hashes, field composition, thresholds, defaults, the
-  coordinate-to-world conversion, the component width, or classification as
+  coordinate-to-world conversion, the world radius, or classification as
   algorithm compatibility changes. Bump `AlgorithmVersion`, and say in the
   commit message whether the bump moved any generated value or was owed only to
   `Config` gaining a field.
@@ -126,19 +126,31 @@ Two things this does not license:
 
 ## Coordinates
 
-- **`Component` is `int16` and stays `int16`.** `WorldRadius` is its paired
-  maximum. There is no migration to a wider width and no phase 9; section 4.2
-  carries the arithmetic, and the short version is that 3.2 billion hexes is
-  several hundred Earths of walkable ground at a pessimistic land fraction. The
-  width is what keeps the rim, the wrap, and a whole-world grid render things a
-  test can reach, and those are properties to protect rather than alpha
-  conveniences to outgrow. The width still appears in exactly two places: that
-  pair, and the compatibility tests. A literal `32767` anywhere else is a defect,
-  and gate 5 stays, because section 4.2's 18-bit contingency is the case both
-  exist for. **64-bit components are rejected**, not deferred.
+- **`WorldRadius` is `32767` and `Component` is `int32`, and these are two
+  decisions.** The radius is the world; the type is storage that is deliberately
+  wider than the domain. Never derive one from the other, and never reintroduce
+  a width-in-bits value as a world's identity — it identified a world only while
+  the radius was a type's maximum, and `100000` and `131071` are different worlds
+  that are both 18 bits. **Anything identifying a world records `WorldRadius`:**
+  world metadata, the fingerprint, gate 5.
+- **The wide storage type is what makes a missing bound check loud.** The range
+  check in `componentOf` is the only thing enforcing the domain. Under a tight
+  type a broken check narrows `98301` to `32765`, an ordinary-looking coordinate
+  in the wrong place; under `int32` it stores `98301`, which `RimDistance`
+  reports as negative. Do not "tighten" the type to match the world.
+- **There is no migration to a larger world and no phase 9.** Section 4.2 carries
+  the arithmetic: 3.2 billion hexes is about 526 times Earth's land area at a 30%
+  land fraction. The radius is what keeps the rim, the wrap, and a whole-world
+  grid render things a test can reach, and those are properties to protect rather
+  than alpha conveniences to outgrow. `WorldRadius` appears in exactly two
+  places: the constant, and the compatibility tests. A literal `32767` anywhere
+  else is a defect, and gate 5 stays, because section 4.2's 18-bit contingency is
+  the case both exist for. **A 63-bit world is rejected**, not deferred.
 - **The canonical domain is `-WorldRadius <= q, r, s <= +WorldRadius`, and the
   extreme negative value of `Component` is not a coordinate** —
-  `-32767 .. 32767`, `math.MinInt16` excluded. This costs no
+  `-32767 .. 32767`. The storage type is wider on both sides, so the type's own
+  extreme is unreachable rather than excluded; what the symmetry buys is that
+  negation and `abs` are total, which is a statement about the map. This costs no
   tiles and it is the constraint that makes negation, `abs`, and the
   `int64` round trip total; `-math.MinInt16` and `|math.MinInt16|` are both
   silently wrong in Go, and `RimDistance` reads such a tile as lying outside the
@@ -233,7 +245,7 @@ These are the rules most likely to be violated by code that looks correct.
   number, with no syntax to grep for. Compare the decoded key set against the
   reflected field set and name the missing field. No `omitempty` on anything
   that affects generation.
-- Fingerprint is SHA-256 over algorithm version, component width, and canonical
+- Fingerprint is SHA-256 over algorithm version, world radius, and canonical
   CBOR. Hash `float64` as bits, normalize `-0.0`, reject `NaN` during
   validation.
 - Scale fields name their unit in the identifier: `WavelengthMiles`, `Hexes`.
@@ -292,7 +304,7 @@ These are the rules most likely to be violated by code that looks correct.
 - Seven opening gates, in order, each an `errors.Is`-able sentinel. **Tests
   assert with `errors.Is`, never on message strings.** No gate performs an
   application write before it passes. Gate 5 rejects a world generated at a
-  different component width.
+  different world radius.
 - Generated tiles, chunks, and PNGs are reproducible caches, not authoritative
   records. If cached, validate against the configuration fingerprint and the
   render version. **Do not build the tile cache in the first implementation;
@@ -320,7 +332,7 @@ These are the rules most likely to be violated by code that looks correct.
   answers it without a browser. Quote the version to humans; compare the pair in
   code. See `DESIGN.md` 29.5.
 - **The fingerprint hashes what was declared, not what was run.** It covers the
-  algorithm version, component width, and configuration — never the generator's
+  algorithm version, world radius, and configuration — never the generator's
   code. Do not "fix" that by folding the build into it: gate 6 compares it when a
   world is *reopened*, and a build-dependent fingerprint would refuse every
   existing world on every patch release. The build identity is stored as world
@@ -373,7 +385,7 @@ These are the rules most likely to be violated by code that looks correct.
   milliseconds, tiles per second. Separate generate from encode before calling
   anything slow.
 - The per-tile benchmarks exist to *explain* a render figure, not to stand
-  beside one. Quote algorithm version, component width, configuration
+  beside one. Quote algorithm version, world radius, configuration
   fingerprint, Go version, `GOARCH`, machine, and `GOMAXPROCS` with any number
   that is going to be compared.
 

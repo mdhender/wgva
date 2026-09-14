@@ -32,17 +32,22 @@ func TestCoordComponentsSumToZero(t *testing.T) {
 }
 
 // TestCanonicalDomain is DESIGN.md 30.4's symmetric-domain sweep: over a large
-// set of inputs, nothing NewCoord produces reaches the extreme negative value of
-// the Component type, everything is inside ±WorldRadius on all three axes, and
-// RimDistance is never negative.
+// set of inputs, everything NewCoord produces is inside ±WorldRadius on all
+// three axes, negation of any result stays in the domain, and RimDistance is
+// never negative.
+//
+// The bound is the only thing enforcing this. Component is wider than the
+// domain (DESIGN.md 4.2), so an escaped coordinate would be visible here rather
+// than truncated into a plausible one — which is what this sweep is looking
+// for.
 func TestCanonicalDomain(t *testing.T) {
 	for _, c := range sampleCoords(t, 200_000) {
 		for _, v := range [3]Component{c.Q(), c.R(), c.S()} {
-			if v == math.MinInt16 {
-				t.Fatalf("%v: component at the excluded extreme negative value", c)
-			}
 			if int64(v) < -WorldRadius || int64(v) > WorldRadius {
 				t.Fatalf("%v: component %d outside ±%d", c, v, WorldRadius)
+			}
+			if int64(-v) != -int64(v) {
+				t.Fatalf("%v: component %d does not negate cleanly", c, v)
 			}
 		}
 		if d := c.RimDistance(); d < 0 {
@@ -71,15 +76,6 @@ func TestCornersAreCanonicalAndDistinct(t *testing.T) {
 			t.Fatalf("negation of %v renormalized to %v", c, neg)
 		}
 	}
-}
-
-func TestComponentOfRejectsTheExcludedValue(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("componentOf accepted the extreme negative value")
-		}
-	}()
-	componentOf(math.MinInt16)
 }
 
 // ---------------------------------------------------------------------------

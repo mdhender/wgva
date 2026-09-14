@@ -100,8 +100,8 @@ type Config struct {
 
 	// The base wavelengths of the elevation scales, in miles. Each is the top of
 	// an fbm ladder once fields exist. A wavelength is absolute and does not
-	// scale with the component width: a continent is a continent at either
-	// width, and what changes is how many of them there are.
+	// scale with the world radius: a continent is a continent at either radius,
+	// and what changes is how many of them there are.
 	ContinentalWavelengthMiles float64
 	RegionalWavelengthMiles    float64
 	LocalWavelengthMiles       float64

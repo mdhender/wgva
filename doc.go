@@ -5,7 +5,7 @@
 //
 // The whole design turns on one invariant:
 //
-//	Tile = F(seed, q, r, algorithmVersion, componentWidth, configuration)
+//	Tile = F(seed, q, r, algorithmVersion, worldRadius, configuration)
 //
 // There is no dependency on generation order, on previously generated tiles, on
 // what has been explored, or on which machine is running. Everything in this
@@ -23,9 +23,12 @@
 // and sorting are automatically correct for tile identity. The zero value is the
 // origin, which is canonical.
 //
-// The world is a wrapped hexagon of radius [WorldRadius], paired with
-// [Component]. The canonical domain excludes the extreme negative value of the
-// component type, which is what makes negation and absolute value total.
+// The world is a wrapped hexagon of radius [WorldRadius]. [Component] is the
+// storage type and is deliberately wider than that, so the bound rather than
+// the type defines the world: the domain is symmetric about the origin, which
+// is what makes negation and absolute value total, and a coordinate that
+// escaped the bound check would be visibly out of range rather than silently
+// truncated into a plausible one.
 //
 // # Floating point
 //

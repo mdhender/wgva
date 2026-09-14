@@ -62,7 +62,7 @@ git push origin main --follow-tags
 The whole design turns on one invariant:
 
 ```text
-Tile = F(seed, q, r, algorithmVersion, componentWidth, configuration)
+Tile = F(seed, q, r, algorithmVersion, worldRadius, configuration)
 ```
 
 No dependency on generation order, on previously generated tiles, on what has
@@ -104,13 +104,18 @@ non-canonical coordinate cannot be built outside the package and `==`, map keys,
 and sorting are automatically correct for tile identity. The zero value is the
 origin, which is canonical.
 
-The world is a wrapped hexagon of radius `WorldRadius`, paired with `Component`,
-which is `int16` and stays `int16` — edges a test can walk to, whole world
-drawable in one grid image, and about 526 times Earth's land area at a 30% land
-fraction. There is no migration to a wider width. The canonical domain excludes the extreme
-negative value of the component type, which is what makes negation and `abs`
-total. The wrap seam is covered by the rim rather than smoothed, which is why
-the fields owe no periodicity.
+The world is a wrapped hexagon of radius `WorldRadius`, which is `32767` and
+settled — edges a test can walk to, whole world drawable in one grid image, and
+about 526 times Earth's land area at a 30% land fraction. There is no migration
+to a larger world.
+
+`Component` is `int32`, deliberately wider than the domain: the radius defines
+the world and the type is only storage. That is what makes a missing bound check
+store a visibly out-of-range value instead of silently truncating it into a
+plausible one, and it is why anything identifying a world records `WorldRadius`
+rather than a width in bits. The domain is symmetric about the origin, which is
+what makes negation and `abs` total. The wrap seam is covered by the rim rather
+than smoothed, which is why the fields owe no periodicity.
 
 ### Where the numbers that decide how a world looks live
 

@@ -3,7 +3,7 @@
 **Module:** `github.com/mdhender/wgva`
 **Target language:** Go (1.26)
 **Coordinate system:** axial hex coordinates `(q, r)`
-**Component width:** signed 16-bit, settled; see section 4.2
+**World radius:** `32767`, settled; coordinates stored in `int32`. See section 4.2
 **Hex scale:** 3-mile apothem
 **World origin:** `(0, 0)`
 **Primary goal:** Generate attractive, geographically coherent terrain on demand without exposing a practical map boundary.
@@ -103,7 +103,7 @@ Generation order must not affect results.
 
 No API requires world width, height, radius, or bounding rectangle.
 
-Canonical coordinates form a hexagonal map whose radius is derived from the component width (section 4). Coordinate operations that leave that map wrap to the corresponding tile on the opposite edge using the scheme in section 7.1. The outermost band of that map is the rim of section 15.1: generated, addressable, and closed to play.
+Canonical coordinates form a hexagonal map of radius `WorldRadius` (section 4). Coordinate operations that leave that map wrap to the corresponding tile on the opposite edge using the scheme in section 7.1. The outermost band of that map is the rim of section 15.1: generated, addressable, and closed to play.
 
 ### 2.3 Local
 
@@ -168,52 +168,38 @@ The first implementation does **not** need to guarantee:
 A tile is uniquely identified by its canonical axial coordinate.
 
 ```go
-// Component is the stored width of one axial coordinate component. It is the
-// single place the world's size is decided.
-type Component = int16
+// Component is the storage type for one axial coordinate component. It is
+// deliberately wider than the canonical domain; section 4.2.
+type Component = int32
 
-// WorldRadius is N in section 7.1: the radius of the canonical hexagon, and
-// the bound every component is range-checked against. It is paired with
-// Component rather than chosen independently, and at the shipped width it is
-// also the largest value a Component can hold.
-const WorldRadius int64 = math.MaxInt16
+// WorldRadius is N in section 7.1: the radius of the canonical hexagon, the
+// bound every component is range-checked against, and the single value that
+// decides the world's topology.
+const WorldRadius int64 = 32767
 ```
 
-Go cannot compute the maximum of a signed type in a constant expression without
-`unsafe`, which section 22 forbids, so the pair is written out and pinned by a
-test rather than derived. The test asserts both halves — that the radius fits the
-type, and that the type is no wider than the radius needs — because at the
-shipped width the pair is exactly tight:
+**These are two decisions, not one.** The radius defines the world; the type is
+storage that has to be wide enough to hold it. Deriving one from the other — a
+radius read off `math.MaxInt16` — makes the world's size change when somebody
+changes a storage type, and makes every argument about the domain a disguised
+argument about the type. Section 4.2 is the decision and section 4.1 is what the
+domain then owes.
+
+Only one relationship has to hold, and it is one-directional:
 
 ```go
-func TestWorldRadiusMatchesComponent(t *testing.T) {
-    if int64(Component(WorldRadius)) != WorldRadius {
-        t.Fatal("WorldRadius does not fit in a Component")
-    }
-    // Through a variable. Component(WorldRadius+1) as a constant expression
-    // does not compile: Go evaluates constant expressions in arbitrary
-    // precision and rejects a conversion that does not fit, so the overflow
-    // this line is looking for is a build error rather than a value. That is a
-    // weaker check — it fires on the pair being written down wrongly, not on
-    // the pair being wrong — and it is not the one this test is making.
-    over := WorldRadius + 1
-    if int64(Component(over)) == over {
-        t.Fatal("WorldRadius is smaller than the Component can hold")
+func TestComponentHoldsTheDomain(t *testing.T) {
+    for _, v := range []int64{0, 1, -1, WorldRadius, -WorldRadius} {
+        if int64(Component(v)) != v {
+            t.Fatal("Component is too narrow for the domain")
+        }
     }
 }
 ```
 
-That is six lines and it fails the instant one half of the pair moves without
-the other, which is the only failure mode worth defending against here.
-
-> **Only the second assertion is width-specific.** It says the `Component` type
-> is not wider than `WorldRadius` needs, which is true because 16 bits is the
-> width and `32767` is its maximum. The 18-bit contingency in section 4.2 would
-> store a radius of `131071` in an `int32` and that assertion would have to go,
-> since the type would then be deliberately wider than the domain. Nothing else
-> in the module would change, because everything already range-checks against
-> `±WorldRadius` rather than against the type — which is the same discipline
-> section 4.1 asks for and the reason the contingency is cheap.
+There is no converse assertion. "The type is no wider than the radius needs" is
+precisely what was given up, and giving it up is what makes the 18-bit
+contingency of section 4.2 a change to one constant.
 
 **`Coord`'s fields are unexported and there is no exported constructor that
 skips normalization.**
@@ -258,64 +244,76 @@ Compute `s`, mirror centers, differences, and every other intermediate with
 `int64`; the one place that must widen further is named in section 7.1. Not
 every pair of in-range `q` and `r` has an `s` within `±WorldRadius`;
 normalization handles that, and the conversion back to `Component` is guarded by
-a range check against `±WorldRadius` — not against the `Component` type's own
-range, which is wider on the negative side (section 4.1). The panic documents an
-invariant rather than hoping for one.
+a range check against `±WorldRadius` — never against the `Component` type's own
+range, which is wider on both sides and deliberately so (section 4.2). **That
+check is the only thing enforcing the domain**, so the panic documents an
+invariant rather than hoping for one, and nothing backs it up.
 
 ### 4.1 The canonical domain is symmetric
 
-`Component` is a two's-complement type, so it can represent one more negative
-value than positive: `math.MinInt16`. **That value is not a coordinate.** The
-canonical domain is
+**The canonical domain is symmetric about the origin**, and that is a property
+of the domain rather than an accident of the storage type. It is
 
 ```text
 -WorldRadius <= q, r, s <= +WorldRadius
 ```
 
-so every component satisfies `-32767 <= v <= 32767` and the map is exactly
-symmetric about the origin. `NewCoord` never produces the extreme
-negative value, the conversion from `int64` to `Component` rejects it, and a
-stored one is malformed data rather than a distant tile.
+so every component satisfies `-32767 <= v <= 32767`. `NewCoord` never produces
+anything outside that, the conversion from `int64` to `Component` rejects it, and
+a stored one is malformed data rather than a distant tile.
 
-**No tiles are lost by this.** The domain is the hexagon
-`max(|q|, |r|, |s|) <= N` of section 7.1, which never contained the extreme
-value in the first place, so the count in section 7.2 is unchanged and the
-constraint costs nothing. What it buys is that three operations become **total**,
+`Component` is `int32` and the domain sits far inside it on both sides, so the
+two's-complement asymmetry that would otherwise matter here — a type holding one
+more negative value than positive, `math.MinInt32`, which is not a coordinate —
+is **unreachable rather than excluded**. An earlier revision of this document
+paired the domain flush against an `int16` and had to carry "the extreme
+negative value is not a coordinate" as a rule somebody could forget. Section 4.2
+retires the rule by making the type wider than the domain. What remains is the
+symmetry itself, which is load-bearing for its own reasons:
+
+**No tiles are lost by the symmetry.** The domain is the hexagon
+`max(|q|, |r|, |s|) <= N` of section 7.1, and the count in section 7.2 follows
+from `N` alone. What the symmetry buys is that three operations are **total**,
 and all three are used in the generation path:
 
 - **Negation.** `-c` is always representable, so the six-fold rotation of
   appendix A, reflection, and every symmetry of the domain map it onto itself
-  with no special case. In Go, `-math.MinInt16` silently returns
-  `math.MinInt16`.
-- **Absolute value.** `|math.MinInt16|` is negative in two's complement. The rim
-  test of section 15.1 is `WorldRadius - max(|q|, |r|, |s|)`, so a component at
-  the extreme value contributes a *negative* magnitude: it loses the comparison
-  it ought to win, and a tile at the very edge of the map is reported as
-  interior. The rim never fires for it, and nothing overflows anywhere to catch
-  the mistake.
+  with no special case. An asymmetric domain would have one value whose negation
+  falls outside it, and the rotation would stop being a permutation of the map.
+- **Absolute value.** The rim test of section 15.1 is
+  `WorldRadius - max(|q|, |r|, |s|)`, which is a distance only if every
+  magnitude is non-negative. In two's complement `|v|` is negative for exactly
+  one value, the type's extreme, and a component there would lose the comparison
+  it ought to win: a tile at the very edge of the map reported as interior, with
+  nothing overflowing anywhere to catch it. That failure is not hypothetical —
+  `hexg` has it today, and a hex `9.2e18` steps out reports `Length() == 0`; see
+  maloquacious/hexg#9.
 - **Round-tripping through `int64`.** `int64(Component(v))` is the identity for
   every valid `v`, which is what lets the normalizer prove a value in range once
   and convert without re-checking.
 
-The same constraint would apply verbatim at any other radius, because both
-bounds are `±WorldRadius` and neither names the type. That is what makes the
-18-bit contingency of section 4.2 a change to two constants rather than a change
-to the code.
+The same constraint applies verbatim at any other radius, because both bounds
+are `±WorldRadius` and neither names the type. That is what makes the 18-bit
+contingency of section 4.2 a change to one constant rather than a change to the
+code.
 
-> This is the one place where the set of values a `Coord` may *hold* is smaller
-> than the set its fields can *represent*, which is why the range check in the
-> normalizer is a real assertion rather than a formality. It is also why the
-> check cannot be skipped on the grounds that the value "came from a
-> `Component` already". Test it directly; see section 30.4.
+> The set of values a `Coord` may *hold* is far smaller than the set its fields
+> can *represent*, which is why the range check in the normalizer is a real
+> assertion rather than a formality, and why it cannot be skipped on the grounds
+> that a value "came from a `Component` already". Test it directly; see section
+> 30.4.
 
-### 4.2 The component width is settled at 16 bits
+### 4.2 The world radius is settled, and the storage type is not the world
 
-**`Component` is `int16`, and that is the width WGVA goes live with.** There is
-no later migration to a wider one. The previous revision of this document
-deferred the shipping width to a phase of its own; that phase is removed, and
-this section is why.
+**`WorldRadius` is `32767`, and that is the world WGVA goes live with.** There is
+no later migration to a larger one. A previous revision of this document deferred
+the shipping size to a phase of its own; that phase is removed, and the first
+half of this section is why.
 
-The world a 16-bit component describes:
+**Coordinates are stored in `int32`, which is wider than the domain on purpose.**
+The second half is why that is the right shape even though the world is settled.
+
+The world a radius of `32767` describes:
 
 | | |
 |---|---:|
@@ -323,6 +321,7 @@ The world a 16-bit component describes:
 | Canonical tiles | `3,221,127,169` |
 | Total area, square miles | `1.0042e11` |
 | Earth *surface* areas | ~510 |
+| Storage type | `int32` |
 
 The number that decides it is not the total, though, because most of a world is
 water. Against Earth's **land** area of about `57.3` million square miles:
@@ -340,7 +339,7 @@ that. No estimate of how fast a game consumes world has to be argued over for
 this to be the wrong trade; the starting number is already several hundred
 Earths.
 
-What the 16-bit width buys, which a wider one actively takes away:
+What this radius buys, which a larger one actively takes away:
 
 - **The rim is reachable.** About twenty-two years of continuous walking, so a
   scroll walk from the origin to the rim and back is a few thousand steps. The
@@ -349,20 +348,63 @@ What the 16-bit width buys, which a wider one actively takes away:
 - **The whole world fits in one image.** 65,535 hexes across, so `render.Grid`
   can draw all of it at a coarse scale. "Does the rim look right everywhere" and
   "do the continents cover the world plausibly" stay questions somebody can
-  answer by looking. At `int32` no image of the whole world exists at any scale
-  that fits in memory.
+  answer by looking. At a 31-bit radius no image of the whole world exists at any
+  scale that fits in memory.
 - **Distribution tests over a meaningful fraction of the world are affordable**
   (section 30.8).
 
 Those are not alpha conveniences that a real world would outgrow. They are how
-the world gets tuned, and they keep working for as long as the width does.
+the world gets tuned, and they keep working for as long as the radius does.
 
-**The width still appears in exactly two places** — the `Component`/`WorldRadius`
-pair above, and the compatibility tests. Nothing else may name a width: not a
-struct field, not a SQLite column type, not a hash input, not a bounds check. A
-literal `32767` anywhere else is still a defect. That discipline costs nothing to
-keep and it is what makes the contingency below a two-line change instead of an
-audit.
+**`WorldRadius` appears in exactly two places** — the constant itself, and the
+compatibility tests. Nothing else may name the world's size: not a struct field,
+not a SQLite column type, not a hash input, not a bounds check. A literal `32767`
+anywhere else is a defect. That discipline costs nothing to keep and it is what
+makes the contingency below a one-line change instead of an audit.
+
+#### Why the storage type is wider than the domain
+
+The obvious pairing is a type exactly as wide as the world — `int16` for a radius
+of `32767` — and it is wrong for three reasons.
+
+**A missing bound check would fail silently.** `Coord`'s whole value is that a
+non-canonical one cannot exist, and the only thing enforcing that is the range
+check in the conversion to `Component`. Under a tight type, a check that was
+wrong or absent would narrow `98301` to `32765`: an ordinary-looking coordinate
+in the wrong place, indistinguishable from a real one in a database, a render, or
+a bug report. Under a wide type the same mistake stores `98301`, which
+`RimDistance` reports as negative and every range assertion catches. **The type
+is not a backstop for the check; a tight one is a silent truncator.** That is the
+same preference for loud failure the floating-point rules in section 25 are built
+on.
+
+**It makes the domain the only decision.** Section 4.1 had to carry a rule about
+the type's extreme negative value not being a coordinate — true, forgettable, and
+an argument about `int16` wearing the clothes of an argument about the world.
+With the domain sitting far inside the type, that hazard is unreachable and the
+rule is gone. What is left is the symmetry, which is a statement about the map.
+
+**It costs nothing.** Measured against the `Tile` of section 4.3:
+
+| storage | `Coord` | `Tile` | one million tiles |
+|---|---:|---:|---:|
+| `int16` | 4 B | 48 B | 45.8 MB |
+| `int32` | 8 B | **48 B** | 45.8 MB |
+| `int64` | 16 B | 56 B | 53.4 MB |
+
+The four bytes a narrow `Coord` saves are consumed by alignment padding before
+the first `float64`; they were never available. SQLite encodes integers in one to
+eight bytes by value rather than by declared column type, so persistence is
+unaffected as well. `int64` is a different matter — 17% on every tile buffer for
+headroom beyond a domain this section already rejects — and is not used.
+
+> **A width in bits no longer identifies a world, and nothing may record one.**
+> While the radius was the type's maximum, `2^(w-1) - 1`, a width in bits named
+> the topology exactly. Separated, the radius is a free integer: `100000` and
+> `131071` are different worlds and both are "18 bits". World metadata, the
+> configuration fingerprint (section 21.2), and gate 5 therefore record
+> `WorldRadius` itself, which is exact, strictly more informative, and makes a
+> refusal legible — *world radius 131071, binary built for 32767*.
 
 #### The 18-bit contingency
 
@@ -370,42 +412,50 @@ audit.
 assumes, the answer is 18 bits, not 32.** It has been costed and it is not
 planned work:
 
-| | 16-bit, shipped | 18-bit, if needed |
+| | shipped | the contingency |
 |---|---:|---:|
 | `N` | `32,767` | `131,071` |
 | Canonical tiles | `3,221,127,169` | `51,539,214,337` |
 | Land at 30%, Earth land areas | ~526 | ~8,400 |
 | Center-to-rim, miles | `196,602` | `786,426` |
 | Years walking at 24 miles a day | ~22 | ~90 |
-| Storage type | `int16` | `int32` |
+| Storage type | `int32` | `int32`, unchanged |
 
 Sixteen times the world for the same code and four times the walk to the rim,
 which is the axis that would actually be under pressure. The rim stays reachable
 by a test and the whole world stays drawable, so nothing in the paragraph above
 is given up.
 
-The one thing that changes shape is the `Component`/`WorldRadius` pairing: the
-radius would be stored in an `int32` deliberately wider than the domain, so the
-second half of the pinning test in section 4 would have to go. Everything else
-already range-checks against `±WorldRadius` rather than against the type.
+**It is a change to one constant.** The storage type already holds it, every
+bound is already checked against `±WorldRadius`, and no test asserts anything
+about the type that a larger radius would break. What does change is everything
+that identifies a world: `AlgorithmVersion`, the goldens, and the written-down
+fingerprint constant of section 21.2 — none of which the storage type has any
+part in.
 
-**Changing the width changes world topology and is an algorithm version change.**
-A world generated at one width cannot be reopened by a binary built at another,
+The configuration would not need to move at all. Wavelengths are absolute in
+miles and do not scale with the world (section 10): a continent is a continent at
+either radius, and what changes is how many of them there are. The rim bands are
+in hexes and would become a smaller fraction of a larger world, which is a
+judgment rather than a necessity.
+
+**Changing the radius changes world topology and is an algorithm version change.**
+A world generated at one radius cannot be reopened by a binary built for another,
 and gate 5 of section 27.5 must refuse it rather than reinterpret the
-coordinates. The width is therefore recorded in the singleton world metadata
+coordinates. The radius is therefore recorded in the singleton world metadata
 alongside the algorithm version and hashed into the configuration fingerprint,
-and the compatibility test asserts that a file from another width is rejected —
+and the compatibility test asserts that a file from another radius is rejected —
 the same way a WGVB file is. **That gate is not removed along with the migration.**
 It is the thing that makes the contingency safe to exercise later, and it is
 cheap to keep correct now.
 
-> **64-bit components are rejected, not deferred.** Widening `Component` to
-> `int64` multiplies the tile count by `4e18` and buys nothing a player can
-> perceive — they would still never reach the rim, and every coordinate they
+> **A 63-bit world is rejected, not deferred.** Taking `WorldRadius` to
+> `math.MaxInt64` multiplies the tile count by `4e18` and buys nothing a player
+> can perceive — they would still never reach the rim, and every coordinate they
 > read would grow to twenty digits. The costs are real: the lattice solve in
-> section 7.1 would need 256-bit intermediates, the database would carry eight
-> bytes per component instead of two in every overlay row, and the rim test
-> would no longer fit in a register pair. Section 34.5 is where a genuinely
+> section 7.1 would need 256-bit intermediates, `Tile` would grow by eight bytes
+> in every batch buffer, and the rim test would no longer fit in a register
+> pair. Section 34.5 is where a genuinely
 > different topology would go; this is not it.
 
 ### 4.3 Tile
@@ -737,7 +787,7 @@ For a cube-coordinate hexagon of radius `N`, the number of tiles is:
 tiles = 1 + 3*N*(N+1)
 ```
 
-| | 16-bit, shipped | 18-bit, the contingency |
+| | shipped | the contingency |
 |---|---:|---:|
 | `N` | `32,767` | `131,071` |
 | Canonical tiles | `3,221,127,169` | `51,539,214,337` |
@@ -1045,8 +1095,8 @@ These are starting values, not requirements. The exact constants live in the con
 The wavelengths above are each scale's *base*. Each is the top of an fbm ladder that descends by the lacunarity, so the octave count decides how far into the next scale's band a field reaches, and section 9.3 bounds how far it may. Once that bound truncates the shortest ladder hardest, the fields stop being strictly ordered by how fast they vary even though their base wavelengths still are; that is a consequence of the bound and not a defect to design around.
 
 Note that these wavelengths are absolute, in miles, and **do not scale with the
-component width**. A continent is a continent at either width. What changes when
-the width changes is how many of them there are, which is the whole point.
+world radius**. A continent is a continent at either radius. What changes when
+the radius changes is how many of them there are, which is the whole point.
 
 ---
 
@@ -1506,7 +1556,7 @@ package wgva
 
 type Seed uint64
 
-type Component = int16 // settled; section 4.2
+type Component = int32 // storage only; the world is WorldRadius, section 4.2
 
 type Coord struct{ /* unexported fields; see section 4 */ }
 
@@ -1684,10 +1734,12 @@ Two rules carry real weight here, and Go's defaults are against both of them.
 Each algorithm version defines a canonical serialization of its effective configuration. Compute a stable fingerprint for cache identity and diagnostics:
 
 ```text
-fingerprint = SHA-256( algorithmVersion LE bytes || componentWidthBits LE bytes || canonical CBOR of Config )
+fingerprint = SHA-256( algorithmVersion LE bytes || worldRadius LE bytes || canonical CBOR of Config )
 ```
 
-The component width is in the fingerprint because it is part of world topology (section 4.2). The width is settled at 16 bits, so this costs one constant and guards nothing today; it is kept because the 18-bit contingency in section 4.2 is the case where a world file that says `int16` must never validate against a binary built wider, and a fingerprint that had to gain an input later would invalidate every world in existence to do it.
+The world radius is in the fingerprint because it *is* the world's topology (section 4.2). It is the radius rather than a coordinate width in bits, and that distinction is load-bearing: a width in bits identified the world only while the radius was forced to be a storage type's maximum, and separated from the type it collides — `100000` and `131071` are different worlds and both are "18 bits". The radius is exact.
+
+It is settled at `32767`, so this input guards nothing today; it is kept because the 18-bit contingency in section 4.2 is the case where a world file must never validate against a binary built for a different radius, and a fingerprint that had to gain an input later would invalidate every world in existence to do it.
 
 > **The fingerprint hashes what was *declared*, not what was *run*.** Every input
 > above is a number somebody wrote down; none of them is the generator's code.
@@ -1933,7 +1985,7 @@ There is no Go flag that relaxes floating-point semantics, which is a genuine ad
 
 The generator must work correctly with no cache. Applications may cache individual tiles, elevation samples, region parameter blocks, or rendered chunks.
 
-Region parameter caching is the likeliest first optimization, since many nearby tiles reuse the same anchors. The key is a region index rather than a coordinate, so it is `int64` to match what `Coord.Cell` returns and names no component width:
+Region parameter caching is the likeliest first optimization, since many nearby tiles reuse the same anchors. The key is a region index rather than a coordinate, so it is `int64` to match what `Coord.Cell` returns and names no world size:
 
 ```go
 type RegionCoord struct {
@@ -1955,7 +2007,7 @@ Correctness must never depend on cache history.
 Generated terrain is a function of:
 
 ```text
-algorithm version + component width + seed + configuration + coordinates
+algorithm version + world radius + seed + configuration + coordinates
 ```
 
 A WGVA database contains exactly one world and everything needed to reproduce that world's generated baseline.
@@ -1969,7 +2021,7 @@ The constant lives in the root of the `wgva` package, and its doc comment carrie
 Two kinds of bump are worth distinguishing in advance, because WGVB found that most of its bumps were the second kind and the first reading of a version number is usually wrong:
 
 - A bump that **moves generated values** — a noise formula, a threshold, a hash
-  domain, a weight, the axial-to-world embedding, the component width.
+  domain, a weight, the axial-to-world embedding, the world radius.
 - A bump that **moves no value at all** and is owed entirely to `Config` gaining
   a field. Section 21.1 forbids defaulting a missing generation-affecting field,
   so a world file written under the older version genuinely cannot be reopened
@@ -1981,7 +2033,7 @@ The database persists, in singleton world metadata:
 ```text
 world seed
 algorithm version
-component width in bits
+world radius
 complete effective generator configuration
 configuration fingerprint
 creating build identity          (provenance only)
@@ -2025,7 +2077,7 @@ CREATE TABLE overlay_settlement (
 
 This matters more than it looks. A `WITHOUT ROWID` table *is* a B-tree keyed by the composite primary key, so loading every overlay in a viewport or a chunk is one ordered range scan rather than a rowid lookup per row through a secondary index. It gives the coordinate locality that would otherwise be the main reason to reach for a dedicated key-value store. See appendix C.
 
-Columns are `INTEGER` regardless of component width, because SQLite has one integer type. The width therefore never appears in the schema — it appears once in the world metadata and once in `Component` (section 4.2) — and a width change needs no migration, only a refusal.
+Columns are `INTEGER` whatever the world's size, because SQLite has one integer type and encodes a value in one to eight bytes by magnitude rather than by declared width. Neither the radius nor the storage type appears in the schema — the radius appears once as `WorldRadius` and once in the world metadata (section 4.2) — so a radius change needs no migration, only a refusal.
 
 ### 27.3 No foreign keys to generated data
 
@@ -2037,7 +2089,7 @@ Enable `PRAGMA foreign_keys = ON` on every connection anyway, so that any constr
 
 Use `zombiezen.com/go/sqlite/sqlitemigration` and add migrations to `sqlitemigration.Schema.Migrations` in order. **Never edit an already-released migration.** Use repeatable migrations only for objects such as views and triggers that are intentionally recreated.
 
-`sqlitemigration` owns `PRAGMA user_version` as the schema migration version, and it does **not** reject a schema newer than the binary — gate 2 below is ours to implement before calling it. SQLite has no application-defined pragmas, so the generator algorithm version and the component width live in the singleton world metadata rather than in a pragma.
+`sqlitemigration` owns `PRAGMA user_version` as the schema migration version, and it does **not** reject a schema newer than the binary — gate 2 below is ours to implement before calling it. SQLite has no application-defined pragmas, so the generator algorithm version and the world radius live in the singleton world metadata rather than in a pragma.
 
 This is one of the few places WGVA keeps a dependency WGVB dropped. WGVB wrote its own forty-line ladder because Rust had no equivalent; Go has a good one from the same author as the SQLite binding, and rewriting it would be owning code for its own sake. The rule that matters — the migration ladder is part of the file format and must not move because a dependency did — is served by pinning the version and by section 30.11.
 
@@ -2049,7 +2101,7 @@ This is one of the few places WGVA keeps a dependency WGVB dropped. WGVB wrote i
 2. Read PRAGMA user_version and reject a schema newer than the binary.
 3. Apply supported ordered schema migrations.
 4. Read and validate the singleton world metadata and complete configuration.
-5. Reject a component width this binary was not built for.
+5. Reject a world radius this binary was not built for.
 6. Reject a generator version the binary cannot reproduce.
 7. Permit normal reads and writes.
 ```
@@ -2345,7 +2397,7 @@ These are integer counts accumulated in one goroutine. That is not the accumulat
 
 #### The configuration file
 
-TOML, flat, one key per line, with the algorithm version, the component width, and the fingerprint in a comment header.
+TOML, flat, one key per line, with the algorithm version, the world radius, and the fingerprint in a comment header.
 
 Write it directly rather than through an encoder's default float formatting: emit each `float64` with `strconv.FormatFloat(v, 'g', -1, 64)`, which is the shortest representation that parses back to the identical bits. Parse with a TOML library, check `MetaData.Undecoded()` for unknown keys and `MetaData.Keys()` for missing ones (section 21.1), and reject either. The settling test is the round trip asserted on the fingerprint as well as on the values, because a file that loses a low bit is a silently different world.
 
@@ -2389,11 +2441,11 @@ wgva-map \
     --out map.png
 ```
 
-Use the standard library `flag` package. The database supplies the seed, the algorithm version, the component width, and the effective configuration, and **this command never creates or modifies one** — an absent or empty file is a refusal naming `wgva-world create`, not an invitation. `cols` and `rows` are tile counts; `hex-radius` is a pixel dimension.
+Use the standard library `flag` package. The database supplies the seed, the algorithm version, the world radius, and the effective configuration, and **this command never creates or modifies one** — an absent or empty file is a refusal naming `wgva-world create`, not an invitation. `cols` and `rows` are tile counts; `hex-radius` is a pixel dimension.
 
 > **It does not read pixels out of the database either.** No tiles are stored
 > (section 27.6), so `--db` supplies the world's *identity* — seed, algorithm
-> version, component width, configuration, fingerprint — and the image is
+> version, world radius, configuration, fingerprint — and the image is
 > regenerated from it every time. The only thing genuinely read from the file
 > and drawn is the player overlays of section 29.4.
 
@@ -2451,7 +2503,7 @@ Bounded like everything else that renders, on the same terms as section 29.1, pl
   system, and a tag that ignored them would go on serving an unexplored map after
   the player explored it.
 
-Two modes, and the seed means something different in each. Without `--db` the generator is constructed in memory from the seed in the route and the default configuration, so **output is diagnostic and does not represent a saved world**, and the page says so; every seed is servable, because the route is where the world comes from. With `--db` the database supplies the seed, the algorithm version, the component width, and the complete effective configuration, and **the seed in the route is a check against the stored one rather than the source of it** — another seed is a 404 naming the one this server holds. Overlays are read fresh from the database on every request, so exploring a world and refreshing shows the exploration.
+Two modes, and the seed means something different in each. Without `--db` the generator is constructed in memory from the seed in the route and the default configuration, so **output is diagnostic and does not represent a saved world**, and the page says so; every seed is servable, because the route is where the world comes from. With `--db` the database supplies the seed, the algorithm version, the world radius, and the complete effective configuration, and **the seed in the route is a check against the stored one rather than the source of it** — another seed is a 404 naming the one this server holds. Overlays are read fresh from the database on every request, so exploring a world and refreshing shows the exploration.
 
 Open one connection per worker **before the port is bound**: a database that fails an opening gate is a server that does not start rather than a server that answers every request with a 500. The server opens and never creates; `wgva-world create` is the only thing that does, because creating a world is a decision rather than a side effect of a typo in a path.
 
@@ -2649,7 +2701,7 @@ session started for that purpose can reasonably refuse them.
    the binary's defaults are the only configuration she has — and no comparison
    to perform, because `--expect` carries it. If the build has moved since step
    4, this refuses and says so. Otherwise it writes the seed, algorithm version,
-   component width, complete effective configuration, and fingerprint before
+   world radius, complete effective configuration, and fingerprint before
    anything else, refuses a file that already exists, and prints the version and
    fingerprint it wrote. This is the only moment a world file comes into
    existence.
@@ -2781,11 +2833,11 @@ Compare physical fields on corresponding tiles at all six wrapped edge pairs. A 
 
 Smoothness across the seam is a separate claim and is **not** asserted, because section 7.1 no longer promises it. What is asserted instead is that the discontinuity exists only where it is expected to, and that a future change that makes the fields periodic fails this test loudly rather than passing quietly — so the documentation and the code cannot drift apart.
 
-These tests run with the rim switched off, which is the configuration that exposes the seam. At the shipped component width they can walk to it.
+These tests run with the rim switched off, which is the configuration that exposes the seam. At the shipped world radius they can walk to it.
 
 ### 30.11 Database Compatibility
 
-Verify that opening rejects each of: a non-WGVA application id (including a WGVB file), a schema newer than the binary, a world generated at a different component width, an unsupported generator version, malformed or incomplete singleton metadata, a configuration whose fingerprint does not match, and an invalid configuration — each **without performing any application write**. Verify that supported older schemas migrate in order and retain the same single-world metadata.
+Verify that opening rejects each of: a non-WGVA application id (including a WGVB file), a schema newer than the binary, a world generated at a different world radius, an unsupported generator version, malformed or incomplete singleton metadata, a configuration whose fingerprint does not match, and an invalid configuration — each **without performing any application write**. Verify that supported older schemas migrate in order and retain the same single-world metadata.
 
 Assert with `errors.Is` against the sentinels of section 27.5, never on message strings.
 
@@ -2822,7 +2874,7 @@ The rim of section 15.1 is cheap to test and easy to get subtly wrong:
 - `ClosedHexes = 0, FalloffHexes = 0` reproduces the unrimmed world **bit for
   bit**, which is what lets sections 30.10 and the goldens coexist with the rim.
 
-A radial walk to the rim is a few thousand steps at the shipped width, which is what keeps these affordable.
+A radial walk to the rim is a few thousand steps at the shipped radius, which is what keeps these affordable.
 
 ---
 
@@ -2894,7 +2946,7 @@ A number from this harness is meaningless beside a number from a different build
 
 - **The algorithm version**, because a version bump can change how many field
   evaluations a tile costs.
-- **The component width.** It is settled at 16 bits, so today this is a constant
+- **The world radius.** It is settled at `32767`, so today this is a constant
   rather than a variable — state it anyway, because the normalizer's fast path
   and the rim test both touch magnitudes that scale with it, and a figure quoted
   without it stops being comparable the moment section 4.2's contingency is
@@ -3003,9 +3055,9 @@ Everything in this phase exists because a *game* needs it. None of it is needed 
 
 ### There is no phase 9
 
-The previous revision of this plan ended with a component width change: `int16`
-through development, `int32` to ship. **That phase is removed and the width is
-settled at 16 bits.** Section 4.2 carries the arithmetic; the short version is
+A previous revision of this plan ended with a world size change: a radius of
+`32767` through development, `2147483647` to ship. **That phase is removed and
+the radius is settled at `32767`.** Section 4.2 carries the arithmetic; the short version is
 that 3.2 billion hexes is several hundred Earths of walkable ground at a
 pessimistic land fraction, and the migration was a topology change, an algorithm
 version bump, and a re-render of every acceptance sheet bought in exchange for
@@ -3016,17 +3068,17 @@ rather than a staging post.
 
 Two things survive the removal and must not be tidied away with it:
 
-- **Gate 5**, which refuses a world generated at a different component width. It
-  now guards a contingency rather than a plan, and a gate written after worlds
-  exist is a gate written too late.
-- **The two-places rule** for naming a width (section 4.2). It is what would make
-  the 18-bit contingency a two-constant change rather than an audit.
+- **Gate 5**, which refuses a world generated at a different radius. It now
+  guards a contingency rather than a plan, and a gate written after worlds exist
+  is a gate written too late.
+- **The two-places rule** for naming the world's size (section 4.2). It is what
+  makes the 18-bit contingency a one-constant change rather than an audit.
 
 > **If play testing shows the world being explored faster than section 4.2
-> assumes, the answer is 18 bits, not 32**: sixteen times the world, four times
-> the walk to the rim, `int32` storage, and the rim still reachable by a test.
-> That is a costed contingency, not scheduled work, and nothing in this plan
-> depends on it.
+> assumes, the answer is a radius of `131071`**: sixteen times the world, four
+> times the walk to the rim, the same `int32` storage, and the rim still
+> reachable by a test. It is one constant. That is a costed contingency, not
+> scheduled work, and nothing in this plan depends on it.
 
 ---
 
@@ -3136,7 +3188,7 @@ The current design uses the finite hexagonal wraparound topology of section 7.1.
 12. Preserve the central invariant:
 
 ```text
-Tile = F(seed, q, r, algorithmVersion, componentWidth, configuration)
+Tile = F(seed, q, r, algorithmVersion, worldRadius, configuration)
 ```
 
 with no dependency on generation order or previously generated tiles.
@@ -3414,7 +3466,7 @@ world file and a game file, opened separately — is rejected.
 
 The argument for splitting was a testing one: map work should not have to stand up a game. That advantage is already available and costs nothing, because the package graph gives it. Map tests import `wgva` and `render` and never `store`; `wgva.NewDefault(seed)` needs no database to exist at all, and a generator test that touched SQLite would be a design error today. Store tests use an in-memory database and touch no file either. **The tuning tool proves the point hardest: it is the tool that decides what worlds look like, and section 28 forbids it from importing `store` at all.** Splitting the file would buy nothing the package boundary has not already bought.
 
-The argument against splitting is asymmetric and worse than it first looks. Restoring an older *world* file is harmless when the seed, algorithm version, component width, and configuration match, because terrain is reproducible — that is the whole point of section 2.1. The danger is a world file whose seed or configuration differs: every player overlay and every player frame is then anchored to terrain that no longer exists at those coordinates, **silently**, because a settlement is a coordinate and a coordinate still resolves. One database makes that unrepresentable. World and game are backed up, restored, and gated together, and the fingerprint gate in section 27.5 already covers both. Splitting would require inventing an eighth gate that stores world identity in the game file and checks it on every open — a new mechanism to protect against a hazard that not splitting does not have.
+The argument against splitting is asymmetric and worse than it first looks. Restoring an older *world* file is harmless when the seed, algorithm version, world radius, and configuration match, because terrain is reproducible — that is the whole point of section 2.1. The danger is a world file whose seed or configuration differs: every player overlay and every player frame is then anchored to terrain that no longer exists at those coordinates, **silently**, because a settlement is a coordinate and a coordinate still resolves. One database makes that unrepresentable. World and game are backed up, restored, and gated together, and the fingerprint gate in section 27.5 already covers both. Splitting would require inventing an eighth gate that stores world identity in the game file and checks it on every open — a new mechanism to protect against a hazard that not splitting does not have.
 
 Revisit only if a genuinely read-only world is shared across several games, which is the one shape where the split pays for its gate.
 
@@ -3436,10 +3488,9 @@ If `bbolt` is ever adopted, the required changes are bounded and known:
   `config_fingerprint`. The **gate order in section 27.5 does not change.**
 - Write the `Coord` key encoding by hand rather than relying on any library's
   tuple encoding, so on-disk key bytes are pinned by our code. Encode each
-  component big-endian with the sign bit flipped — `uint16(q) ^ 0x8000` at the
-  shipped width, `uint32(q) ^ 0x80000000` if section 4.2's contingency is ever
-  exercised — so lexicographic byte order matches numeric order and range scans
-  work.
+  component big-endian with the sign bit flipped — `uint32(q) ^ 0x80000000`,
+  which follows the storage type and does not change with the world radius — so
+  lexicographic byte order matches numeric order and range scans work.
 - Pin the version exactly and treat a major upgrade as a format migration.
 - Sections 30.11 and 27.3 survive unchanged in substance.
 
@@ -3625,18 +3676,11 @@ back through three layers.
 
 *Phase 1.*
 
-### D.5 Constants that are derived rather than written down
+### D.5 Constants that are derived, and one that must not be
 
-Three values could have been literals and are not, each for a reason the body
+Two values could have been literals and are not, each for a reason the body
 already gives somewhere else:
 
-- **`ComponentWidthBits`** is `bits.Len64(WorldRadius) + 1`, not `16`. Section
-  4.2 says the width appears in exactly two places and a literal `32767`
-  elsewhere is a defect; a third constant spelling the same decision in a
-  different unit is the same defect wearing a different name. A two's complement
-  type of `w` bits holds a maximum of `2^(w-1) - 1`, whose bit length is `w-1`.
-  It is a function rather than a constant because Go cannot call one in a
-  constant expression.
 - **`NyquistWavelengthMiles`** is `4 * ApothemMiles`, not `12`. Section 9.3 says
   the limit is derived from the apothem, and a literal would survive a change to
   the hex scale.
@@ -3647,7 +3691,19 @@ already gives somewhere else:
   guarantees for both steps. Writing it as a decimal literal would be a third
   value again, and one that no longer follows the apothem.
 
-*Phase 1.*
+And one value that was derived and is now gone:
+
+- **There is no `ComponentWidthBits`, and there must not be one.** An earlier
+  revision derived a coordinate width in bits from `WorldRadius` and recorded
+  *that* as the world's identity. The derivation was injective only because the
+  radius was pinned to a storage type's maximum; once section 4.2 separated them
+  it stopped being — `100000` and `131071` are different worlds and both are 18
+  bits — so anything identifying a world records `WorldRadius` itself. This is
+  the one entry in this appendix describing something removed rather than
+  chosen, and it is here because the removed thing is easy to reinvent and
+  reinventing it would be silent.
+
+*Phase 1; the last entry revised when the storage type was widened.*
 
 ### D.6 Validation the body does not dictate
 

@@ -8,75 +8,77 @@ import (
 	"testing"
 )
 
-// TestWorldRadiusMatchesComponent pins the one decision the world's size is made
-// of. It fails the instant one half of the pair moves without the other.
+// TestComponentHoldsTheDomain pins the one relationship that must hold between
+// the storage type and the world: every value in the canonical domain survives
+// the round trip through Component.
 //
-// Only the second assertion is width-specific: it says the Component type is no
-// wider than WorldRadius needs, which is true because 16 bits is the settled
-// width and 32767 is its maximum. DESIGN.md 4.2's 18-bit contingency would store
-// a radius of 131071 in an int32 and that assertion would have to go, since the
-// type would then be deliberately wider than the domain. Nothing else changes,
-// because everything else range-checks against ±WorldRadius.
-func TestWorldRadiusMatchesComponent(t *testing.T) {
-	if int64(Component(WorldRadius)) != WorldRadius {
-		t.Fatal("WorldRadius does not fit in a Component")
-	}
-	// Through a variable: Component(WorldRadius+1) as a constant expression does
-	// not compile, which is a weaker form of the same check and not the one this
-	// test is making.
-	over := WorldRadius + 1
-	if int64(Component(over)) == over {
-		t.Fatal("WorldRadius is smaller than the Component can hold")
+// It does not assert the converse. Component is deliberately wider than the
+// domain (DESIGN.md 4.2), so "the type is no wider than the radius needs" is
+// not an invariant here — it is the thing that was given up on purpose, and the
+// 18-bit contingency is a change to WorldRadius alone because of it.
+func TestComponentHoldsTheDomain(t *testing.T) {
+	for _, v := range []int64{0, 1, -1, WorldRadius, -WorldRadius, WorldRadius - 1, 1 - WorldRadius} {
+		if int64(Component(v)) != v {
+			t.Fatalf("Component(%d) does not round-trip; the type is too narrow for the domain", v)
+		}
 	}
 }
 
-// TestComponentWidthBitsMatchesComponent keeps the width recorded in world
-// metadata and hashed into the fingerprint in step with the type. The reference
-// counts bytes through reflect rather than repeating the derivation.
+// TestDomainIsSymmetricAndTotal is DESIGN.md 4.1 stated as the property it
+// actually is, rather than as a fact about a particular width: negation and
+// absolute value are total on the canonical domain.
 //
-// This is width-specific for the same reason the pinning test above is.
-// ComponentWidthBits derives the *domain* width from WorldRadius, which is what
-// the fingerprint wants — it is what distinguishes one world topology from
-// another. At the shipped width the domain and the storage type are the same
-// size, so tying them together here is a free extra check. Under DESIGN.md
-// 4.2's 18-bit contingency they part company: the function would report 18 and
-// the type would be 32 bits wide, which is correct on both counts, and this
-// assertion would be the one to drop.
-func TestComponentWidthBitsMatchesComponent(t *testing.T) {
-	bitsInType := 8 * uint32(reflect.TypeFor[Component]().Size())
-	if got := ComponentWidthBits(); got != bitsInType {
-		t.Fatalf("ComponentWidthBits() = %d, want %d", got, bitsInType)
+// The previous formulation was "the extreme negative value of Component is not
+// a coordinate", which was true when the domain sat flush against the type. It
+// no longer does, so the hazard is unreachable rather than excluded — but the
+// symmetry is still what makes the six-fold rotation map the domain onto
+// itself, so it is still worth asserting directly.
+func TestDomainIsSymmetricAndTotal(t *testing.T) {
+	for _, v := range []int64{0, 1, -1, WorldRadius, -WorldRadius} {
+		c := Component(v)
+		if int64(-c) != -v {
+			t.Fatalf("negating Component(%d) gave %d, want %d", v, -c, -v)
+		}
+		if got := abs64(int64(c)); got < 0 {
+			t.Fatalf("abs64 of Component(%d) is negative", v)
+		}
 	}
-	// And the width and the radius agree: a two's complement type of w bits
-	// holds a maximum of 2^(w-1) - 1.
-	wantRadius := uint64(1)<<(bitsInType-1) - 1
-	if uint64(WorldRadius) != wantRadius {
-		t.Fatalf("WorldRadius = %d, want %d for a %d-bit component", WorldRadius, wantRadius, bitsInType)
+
+	// The domain is strictly inside the type on both sides, which is what makes
+	// the two assertions above unconditional rather than lucky.
+	lo, hi := int64(math.MinInt32), int64(math.MaxInt32)
+	if -WorldRadius <= lo || WorldRadius >= hi {
+		t.Fatal("the canonical domain reaches the ends of Component; DESIGN.md 4.1's hazard is live again")
 	}
 }
 
-// TestExtremeNegativeIsNotACoordinate is DESIGN.md 4.1 in its own right: the
-// canonical domain is symmetric, so the value a two's complement Component can
-// hold but the domain excludes is one below -WorldRadius.
-func TestExtremeNegativeIsNotACoordinate(t *testing.T) {
-	if int64(math.MinInt16) >= -WorldRadius {
-		t.Fatal("the Component type has no value below -WorldRadius; the symmetry claim is vacuous")
-	}
-	// Negation and absolute value are total on the canonical domain and are not
-	// total on the type. Both halves matter.
-	if -int64(math.MinInt16) <= 0 {
-		t.Fatal("negating the excluded value is well behaved in int64; check the test")
-	}
-	if v := Component(math.MinInt16); -v != v {
-		t.Fatal("negating the excluded value is well behaved in a Component; the exclusion is unnecessary")
+// TestOutOfDomainValuesAreRefused checks the other half: the bound is enforced
+// by componentOf and by nothing else, so it has to be enforced correctly.
+func TestOutOfDomainValuesAreRefused(t *testing.T) {
+	// Values a narrower storage type would have silently truncated into
+	// plausible coordinates, and which are now visibly out of range.
+	for _, v := range []int64{
+		WorldRadius + 1, -WorldRadius - 1,
+		math.MinInt16, 98301, -98301,
+		math.MaxInt32, math.MinInt32,
+		math.MaxInt64, math.MinInt64,
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("componentOf(%d) was accepted; it is outside ±%d", v, WorldRadius)
+				}
+			}()
+			componentOf(v)
+		}()
 	}
 }
 
-// TestTileCount is the arithmetic statement that excluding the extreme negative
-// value costs no tiles: the domain is the hexagon of radius N, whose size is
-// 1 + 3N(N+1), and that is also the index of the wraparound lattice.
+// TestTileCount is the arithmetic statement that the symmetric domain costs no
+// tiles: the domain is the hexagon of radius N, whose size is 1 + 3N(N+1), and
+// that is also the index of the wraparound lattice.
 func TestTileCount(t *testing.T) {
-	// uint64 throughout. The count fits an int64 comfortably at this width, at
+	// uint64 throughout. The count fits an int64 comfortably at this radius, at
 	// 3.2e9; uint64 costs nothing and does not have to be revisited if
 	// DESIGN.md 4.2's contingency is ever exercised.
 	n := uint64(WorldRadius)
@@ -97,5 +99,26 @@ func TestTileCount(t *testing.T) {
 	det := 3*n*n + 3*n + 1
 	if det != tiles {
 		t.Fatalf("lattice index %d, tile count %d", det, tiles)
+	}
+}
+
+// TestCoordCostsNothingToWiden records the measurement behind DESIGN.md 4.2's
+// claim that the wider storage type is free. A Coord doubles; anything that
+// pairs it with a float64 does not, because the narrower Coord's saving was
+// alignment padding.
+func TestCoordCostsNothingToWiden(t *testing.T) {
+	type narrow struct{ q, r int16 }
+	type withNarrow struct {
+		c                narrow
+		a, b, c2, d      float64
+		e, f, g, rimFlag uint8
+	}
+	type withWide struct {
+		c                Coord
+		a, b, c2, d      float64
+		e, f, g, rimFlag uint8
+	}
+	if got, want := reflect.TypeFor[withWide]().Size(), reflect.TypeFor[withNarrow]().Size(); got != want {
+		t.Fatalf("a tile-shaped struct is %d bytes with the current Component and %d with an int16 one", got, want)
 	}
 }
