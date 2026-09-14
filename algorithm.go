@@ -46,4 +46,9 @@ const WorldRadius int64 = 32767
 //	1  Initial algorithm. Coordinates, the wrapped domain, the axial-to-world
 //	   embedding, the direction table, and the domain-separated mixer. The
 //	   world radius is 32767; DESIGN.md 4.2.
-const AlgorithmVersion uint32 = 1
+//	2  Continuous fields. The owned simplex and value noises, the Field
+//	   composition tree with fbm and domain warping, and the seed-derived
+//	   sampling offset. Config gained the four octave ladders, the detail scale,
+//	   and the warp ladder, and lost the four bare wavelength fields, so no
+//	   version 1 configuration can be read.
+const AlgorithmVersion uint32 = 2

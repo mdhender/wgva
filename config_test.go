@@ -42,18 +42,38 @@ func TestConfigValidation(t *testing.T) {
 		{"sea level below zero", "SeaLevel", ErrOutOfRange,
 			func(c *Config) { c.SeaLevel = -0.001 }},
 
-		{"continental wavelength NaN", "ContinentalWavelengthMiles", ErrNotFinite,
-			func(c *Config) { c.ContinentalWavelengthMiles = math.NaN() }},
-		{"continental wavelength zero", "ContinentalWavelengthMiles", ErrNotPositive,
-			func(c *Config) { c.ContinentalWavelengthMiles = 0 }},
-		{"continental wavelength negative", "ContinentalWavelengthMiles", ErrNotPositive,
-			func(c *Config) { c.ContinentalWavelengthMiles = -1 }},
-		{"regional wavelength below Nyquist", "RegionalWavelengthMiles", ErrBelowNyquist,
-			func(c *Config) { c.RegionalWavelengthMiles = NyquistWavelengthMiles - 0.5 }},
-		{"local wavelength below Nyquist", "LocalWavelengthMiles", ErrBelowNyquist,
-			func(c *Config) { c.LocalWavelengthMiles = 1 }},
-		{"warp wavelength zero", "WarpWavelengthMiles", ErrNotPositive,
-			func(c *Config) { c.WarpWavelengthMiles = 0 }},
+		{"continental wavelength NaN", "Continental.WavelengthMiles", ErrNotFinite,
+			func(c *Config) { c.Continental.WavelengthMiles = math.NaN() }},
+		{"continental wavelength zero", "Continental.WavelengthMiles", ErrNotPositive,
+			func(c *Config) { c.Continental.WavelengthMiles = 0 }},
+		{"continental wavelength negative", "Continental.WavelengthMiles", ErrNotPositive,
+			func(c *Config) { c.Continental.WavelengthMiles = -1 }},
+		{"regional wavelength below Nyquist", "Regional.WavelengthMiles", ErrBelowNyquist,
+			func(c *Config) { c.Regional.WavelengthMiles = NyquistWavelengthMiles - 0.5 }},
+		{"local wavelength below Nyquist", "Local.WavelengthMiles", ErrBelowNyquist,
+			func(c *Config) { c.Local.WavelengthMiles = 1 }},
+		{"warp wavelength zero", "Warp.WavelengthMiles", ErrNotPositive,
+			func(c *Config) { c.Warp.WavelengthMiles = 0 }},
+
+		// The ladder, which is what DESIGN.md 9.3 is actually about. A count of
+		// zero is a field that evaluates to nothing; a count that descends past
+		// the grid's Nyquist wavelength is per-tile noise paid for and thrown
+		// away, and it is the octave count that is named because that is the
+		// value somebody typed.
+		{"no octaves", "Continental.Octaves", ErrOctaveCount,
+			func(c *Config) { c.Continental.Octaves = 0 }},
+		{"too many octaves", "Continental.Octaves", ErrOctaveCount,
+			func(c *Config) { c.Continental.Octaves = MaxOctaves + 1 }},
+		{"ladder below Nyquist", "Detail.Octaves", ErrBelowNyquist,
+			func(c *Config) { c.Detail.Octaves = 4 }},
+		{"lacunarity of one", "Regional.Lacunarity", ErrOutOfRange,
+			func(c *Config) { c.Regional.Lacunarity = 1 }},
+		{"lacunarity NaN", "Regional.Lacunarity", ErrNotFinite,
+			func(c *Config) { c.Regional.Lacunarity = math.NaN() }},
+		{"gain of zero", "Local.Gain", ErrOutOfRange,
+			func(c *Config) { c.Local.Gain = 0 }},
+		{"gain above one", "Local.Gain", ErrOutOfRange,
+			func(c *Config) { c.Local.Gain = 1.5 }},
 
 		{"warp strength NaN", "WarpStrengthMiles", ErrNotFinite,
 			func(c *Config) { c.WarpStrengthMiles = math.NaN() }},
@@ -111,11 +131,15 @@ func TestConfigValidation(t *testing.T) {
 // a memory.
 func TestValidConfigurations(t *testing.T) {
 	cases := map[string]func(*Config){
-		"no warp":               func(c *Config) { c.WarpStrengthMiles = 0 },
-		"sea level at zero":     func(c *Config) { c.SeaLevel = 0 },
-		"sea level at one":      func(c *Config) { c.SeaLevel = 1 },
-		"wavelength at Nyquist": func(c *Config) { c.LocalWavelengthMiles = NyquistWavelengthMiles },
-		"polar ice rim":         func(c *Config) { c.Rim.Kind = RimPolarIce },
+		"no warp":           func(c *Config) { c.WarpStrengthMiles = 0 },
+		"sea level at zero": func(c *Config) { c.SeaLevel = 0 },
+		"sea level at one":  func(c *Config) { c.SeaLevel = 1 },
+		"wavelength at Nyquist": func(c *Config) {
+			c.Local = LadderConfig{WavelengthMiles: NyquistWavelengthMiles, Octaves: 1, Lacunarity: 2, Gain: 0.5}
+		},
+		"single octave": func(c *Config) { c.Detail.Octaves = 1 },
+		"gain of one":   func(c *Config) { c.Detail.Gain = 1 },
+		"polar ice rim": func(c *Config) { c.Rim.Kind = RimPolarIce },
 		// DESIGN.md 15.1: the unrimmed world must stay a valid configuration,
 		// because it is how the wrap tests see the seam they assert on.
 		"no rim": func(c *Config) { c.Rim.ClosedHexes, c.Rim.FalloffHexes = 0, 0 },

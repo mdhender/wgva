@@ -55,8 +55,17 @@ func TestConfigReturnsACopy(t *testing.T) {
 // function value may appear in it, and any cache belongs outside. See
 // DESIGN.md 30.12.
 func TestGeneratorShape(t *testing.T) {
+	// The field tree is recursive — a Field holds a *Field — so the walk has to
+	// remember which types it has already opened or it does not terminate.
+	seen := map[reflect.Type]bool{}
+
 	var forbidden func(reflect.Type, string)
 	forbidden = func(typ reflect.Type, path string) {
+		if seen[typ] {
+			return
+		}
+		seen[typ] = true
+
 		switch typ.Kind() {
 		case reflect.Chan, reflect.Map, reflect.Func, reflect.UnsafePointer:
 			t.Errorf("%s is a %v, which a concurrently read Generator must not hold", path, typ.Kind())
