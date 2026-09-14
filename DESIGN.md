@@ -2377,12 +2377,16 @@ viewport at a time.
 
 #### The trap is build skew, not a touched form
 
-Because the administrator cannot supply a configuration, the obvious hazard —
-sampling seeds under a configuration somebody had edited in the form — is not
-really hers. It is an accident she has no reason to have, and the label below
-catches it.
+Because the administrator cannot supply a configuration *file*, the obvious
+hazard looks like it is not hers: sampling seeds under a configuration somebody
+had deliberately edited in the form is a thing she has no reason to do. But she
+can still do it **by accident** — the form is on a tab she has open, and a
+stray edit is one click and one `POST` — and the consequence is the full
+hazard, because the window she is judging is then drawn under a configuration
+that exists nowhere but that process's memory.
 
-The hazard that *is* hers is the same shape one level up. **A seed only names a
+The second hazard is the same shape one level up, and she is exposed to it
+without touching anything. **A seed only names a
 world together with the build that drew it.** Sampling happens in `wgva-tune`
 and creating happens in `wgva-world`, and nothing makes those two the same
 binary. During alpha the defaults move whenever tuning improves — that is what
@@ -2395,23 +2399,57 @@ sentence: the seed is valid, the configuration is valid, every gate in section
 that was chosen, and the only evidence is that the map looks different from the
 one in the browser tab — which by then is closed.
 
-Three cheap things address it, all of them already implied by what the design
-stores:
+**So the check is enforced, not printed.** `wgva-world create` requires
+`--expect <fingerprint>` and refuses a mismatch, naming both values. A silently
+different world becomes a message.
 
-1. **The tuning tool prints the configuration fingerprint and the algorithm
-   version on every tab**, and labels the configuration as this binary's
-   defaults or as modified, against the written-down constant of section 21.2.
-   The label catches the accident; the fingerprint catches the skew.
-2. **What the administrator carries from step 4 to step 5 is a seed *and* a
-   fingerprint**, not a seed. That is the smallest unit that names a world.
-3. **`wgva-world create` prints the fingerprint and version it wrote**, so the
-   pair can be compared before anybody plays on the result.
+Nobody types a fingerprint, and nothing about this asks them to. The tuning tool
+emits the whole command line on the page for the window being viewed:
 
-That leaves the comparison to a person, which is the weakest of the three. If it
-proves insufficient in practice, the enforcement is one flag and one equality
-test — `wgva-world create --expect <fingerprint>`, refusing on mismatch — and it
-converts a silently different world into a refusal that names both values. Do
-not add it before the printed pair has been given a chance to be enough.
+```text
+wgva-world create --seed 0123456789abcdef --expect 3f2a9c1e88b04d7a world.wgva
+```
+
+Copy one line, paste it, and the comparison happens without a person performing
+it. (Emitting that text is not an import: `cmd/wgva-tune` still has no path to
+`store`, and a command line is a string.)
+
+#### Why the enforced value is the fingerprint and the quoted value is the version
+
+The build version looks like it would do just as well here, and for an
+administrator running a released binary she has not touched, it would: our own
+rule makes a released build's version determine its defaults, because moving a
+default is a code change that bumps, and section 21.2's written-down constant
+fails the build until somebody does. **For that case the two are the same
+fact**, and she should read, quote, and file bug reports against the *version*,
+because `v0.4.0-alpha` is a thing a person can say out loud and
+`3f2a9c1e88b04d7a` is not.
+
+They come apart in three places, and the first is hers:
+
+- **She changed a setting, probably by accident.** Same binary, same version
+  string, different configuration, different world. A version comparison passes
+  and creates the wrong world; the fingerprint refuses. This is the case that
+  settles it: the value that must be enforced is the one that moves when the
+  world moves, and the version does not move here at all.
+- **The version is finer than the configuration.** Most bumps change no default,
+  so comparing versions would refuse worlds that are in fact identical. The
+  fingerprint changes when, and only when, the world would.
+- **The version is true by our observing a rule; the fingerprint is true by
+  construction.** They part company wherever the rule is not in force — a
+  developer's working tree, where an uncommitted change to the defaults produces
+  `0.4.0-alpha+abc1234-dirty` and two different dirty builds share that string.
+  The fingerprint does not lie there.
+
+So: **the version is the name and the fingerprint is the proof.** Print both
+everywhere; quote the version; compare the fingerprint.
+
+One thing this simplifies. The defaults-or-modified label of section 29.1 was
+carrying the accidental-edit case on its own, which meant it only worked if
+somebody read it. With `--expect` enforced, a stray edit ends as a refusal
+whether or not anyone looked at the label, and the label goes back to being what
+it should be — a courtesy that explains the refusal before it happens, rather
+than the only thing standing between an accident and a wrong world.
 
 An administrator sampling seeds never needs the `POST` routes at all, so a
 session started for that purpose can reasonably refuse them.
@@ -2431,14 +2469,15 @@ session started for that purpose can reasonably refuse them.
    developer's and everything below it is the administrator's.
 4. **Sample seeds.** Administrator, still no database. `wgva-tune`, confirm the
    page says *defaults*, then walk seeds in the grid tab until a world looks
-   worth playing on. Keep the link.
-5. **Create the world.** `wgva-world create --seed <hex> world.wgva`, with no
-   configuration argument — the binary's defaults are the only configuration she
-   has. Writes the seed, algorithm version, component width, complete effective
-   configuration, and fingerprint before anything else; refuses a file that
-   already exists; prints the fingerprint and version. **Check that pair against
-   what step 4 showed**, because this is the step where build skew becomes a
-   world. This is the only moment a world file comes into existence.
+   worth playing on. Copy the `wgva-world create` line the page emits for it.
+5. **Create the world.** Paste the line from step 4. No configuration argument —
+   the binary's defaults are the only configuration she has — and no comparison
+   to perform, because `--expect` carries it. If the build has moved since step
+   4, this refuses and says so. Otherwise it writes the seed, algorithm version,
+   component width, complete effective configuration, and fingerprint before
+   anything else, refuses a file that already exists, and prints the version and
+   fingerprint it wrote. This is the only moment a world file comes into
+   existence.
 6. **Look at it.** `wgva-serve --db world.wgva` for the viewer, `wgva-map --db
    world.wgva …` for an image file. Both open; neither writes.
 7. **Change your mind.** During alpha, do not migrate: delete the file and
@@ -2459,7 +2498,8 @@ reached by passing a database flag with a path that happens not to exist yet is
 exactly the typo-becomes-a-side-effect that the rest of section 27 refuses.
 
 ```sh
-wgva-world create --seed 0123456789abcdef [--config config.toml] world.wgva
+wgva-world create --seed <hex> --expect <fingerprint> [--config file] world.wgva
+wgva-world fingerprint
 ```
 
 - `--seed` is sixteen hexadecimal digits, matching section 29.1's spelling
@@ -2472,8 +2512,18 @@ wgva-world create --seed 0123456789abcdef [--config config.toml] world.wgva
   candidate configuration can be given a world before it is shipped — chiefly to
   exercise the gates of section 27.5 in a test. When given, the file's
   fingerprint is recomputed rather than trusted from its comment header.
-- The fingerprint and algorithm version actually written are **printed**, with or
-  without `--config`. See the skew hazard above; this line is the whole guard.
+- `--expect` is **required** and takes the configuration fingerprint the caller
+  believes they are creating from. A mismatch is a refusal naming both values and
+  writes nothing. There is no `--force` and no way to skip it: the whole hazard
+  above is that the wrong world is created without anybody noticing, and an
+  optional guard against an unnoticeable failure is not a guard.
+- `wgva-world fingerprint` prints this binary's version and the fingerprint of
+  its built-in defaults, so `--expect` is answerable without a browser — from a
+  script, a fresh checkout, or a machine with no tuning tool running. It is the
+  first of the inspection subcommands below and it exists because requiring a
+  flag without a way to answer it would be a trap of its own.
+- The version and fingerprint actually written are **printed** on success, with
+  or without `--config`.
 - The command **refuses an existing file**. There is no `--force`: removing a
   world is something a person does deliberately, with `rm`.
 - It takes no viewport, no layer, and no output image, and it *cannot* —
