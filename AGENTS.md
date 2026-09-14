@@ -24,6 +24,66 @@ Do not build the database, the one-shot renderer, or the viewer early because
 they seem foundational. They are not, and building them first is exactly the
 mistake this ordering exists to avoid.
 
+## Alpha workflow
+
+While the project is in alpha, work lands directly on `main`. These are standing
+authorizations and do not need to be re-confirmed per change.
+
+- **Commit to `main`. Never branch.** No feature branches, no pull requests.
+- **Push after committing**, with `git push origin main --follow-tags`.
+- Both expire when alpha does.
+
+### Versioning
+
+`version.go` carries the module's semantic version. Major stays `0` and the
+pre-release stays `alpha` for the whole of alpha.
+
+| Change | Bump |
+|---|---|
+| A feature implemented | minor |
+| A bug fixed | minor |
+| Any other code change — a tweaked setting, a refactor, a test | patch |
+| Documentation only | none |
+
+**The bump goes in the same commit as the change it describes**, never in a
+commit of its own: a version bump with nothing beside it is a number with no
+referent. Tag that commit, annotated, and push the tag with it:
+
+```sh
+git tag -a v0.2.0-alpha -m 'one line on what moved'
+git push origin main --follow-tags
+```
+
+A docs-only commit gets no bump and no tag, which is why the design revision
+that rewrote `DESIGN.md` and this file carries neither.
+
+### The generator's own version numbers do not get ceremony yet
+
+`AlgorithmVersion`, `RenderVersion`, and `PageVersion` are world-format and
+cache-validity counters rather than semantic versions, and `DESIGN.md` section
+27 treats a bump as a serious compatibility event. **That seriousness is about
+worlds somebody wants to keep, and during alpha there are none.** Every change
+may be breaking, tearing down a database and rebuilding costs nothing, and the
+terrain tuning tool is first in the build order precisely so the generation
+algorithm can be iterated on with no database in the loop. There is very little
+damage to contain.
+
+So classify an algorithm change by what it *is*, and let `version.go` carry it:
+
+- Fixing a bug in the algorithm is a **bug fix** — minor.
+- Improving the algorithm is a **feature** — minor.
+- Tweaking a setting is **any other code change** — patch.
+
+Two things this does not license:
+
+- **Build the gates anyway.** The seven opening gates of section 27.5, the
+  fingerprint check, and the component-width refusal are phase 8 work and must
+  behave as specified. What alpha relaxes is whether old worlds stay openable,
+  not whether a binary refuses a world it cannot reproduce.
+- **This expires with alpha.** The first world somebody is unwilling to throw
+  away is the moment `AlgorithmVersion` starts costing what section 27 says it
+  costs. Say so in the commit that leaves alpha, and delete this subsection then.
+
 ## Core invariants
 
 - Preserve `Tile = F(seed, coordinate, algorithm version, component width,
