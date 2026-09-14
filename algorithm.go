@@ -8,17 +8,23 @@ import (
 )
 
 // Component is the stored width of one axial coordinate component. It is the
-// single place the world's size is decided: int16 for the alpha, int32 for the
-// shipping world.
+// single place the world's size is decided, and it is settled: int16, with no
+// migration to a wider width. DESIGN.md 4.2 carries the arithmetic — 3.2 billion
+// hexes is roughly 526 times Earth's land area at a 30% land fraction, and the
+// width is what keeps the rim reachable and the whole world drawable in one
+// image.
 //
 // The width appears in exactly two places in this module — here, paired with
 // WorldRadius, and in the compatibility tests. Nothing else may name a width,
-// and a literal 32767 anywhere else is a defect. See DESIGN.md 4.2.
+// and a literal 32767 anywhere else is a defect. That discipline is kept even
+// though nothing is planned to change, because it is what would make DESIGN.md
+// 4.2's 18-bit contingency a two-constant change rather than an audit.
 type Component = int16
 
-// WorldRadius is N in DESIGN.md 7.1: the largest value a Component can hold,
-// and the radius of the canonical hexagon. It is paired with Component rather
-// than chosen independently.
+// WorldRadius is N in DESIGN.md 7.1: the radius of the canonical hexagon, and
+// the bound every component is range-checked against. It is paired with
+// Component rather than chosen independently, and at the shipped width it is
+// also the largest value a Component can hold.
 //
 // Go cannot compute the maximum of a signed type in a constant expression
 // without unsafe, which DESIGN.md 22 forbids, so the pair is written out and
@@ -50,5 +56,6 @@ func ComponentWidthBits() uint32 {
 // Version history:
 //
 //	1  Initial algorithm. Coordinates, the wrapped domain, the axial-to-world
-//	   embedding, the direction table, and the domain-separated mixer.
+//	   embedding, the direction table, and the domain-separated mixer. The
+//	   component width is 16 bits and is settled; DESIGN.md 4.2.
 const AlgorithmVersion uint32 = 1

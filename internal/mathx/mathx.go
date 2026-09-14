@@ -79,11 +79,9 @@ func Mul(a, b float64) float64 {
 // holding the high 64 bits.
 //
 // It exists for one caller: the stage-3 lattice solve in DESIGN.md 7.1, whose
-// products reach 6e23 at the alpha component width and 4e28 at the shipping
-// width, and whose basis determinant alone does not fit in an int64 at the
-// shipping width. That branch is cold — no coordinate the program produces
-// reaches it — so this is written for exactness and for being testable
-// directly, not for speed.
+// products reach 6.0e23 because the solve accepts any int64 coordinate pair.
+// That branch is cold — no coordinate the program produces reaches it — so this
+// is written for exactness and for being testable directly, not for speed.
 type Int128 struct {
 	hi int64
 	lo uint64

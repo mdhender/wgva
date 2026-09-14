@@ -126,15 +126,19 @@ Two things this does not license:
 
 ## Coordinates
 
-- **`Component` is `int16` for the alpha and `int32` for the shipping world**,
-  and `WorldRadius` is its paired maximum. The alpha width exists so the rim,
-  the wrap, and a whole-world grid render are things a test can reach. The
-  width appears in exactly two places: that pair, and the compatibility tests.
-  A literal `32767` anywhere else is a defect. **64-bit components are
-  rejected**, not deferred; see section 4.2.
+- **`Component` is `int16` and stays `int16`.** `WorldRadius` is its paired
+  maximum. There is no migration to a wider width and no phase 9; section 4.2
+  carries the arithmetic, and the short version is that 3.2 billion hexes is
+  several hundred Earths of walkable ground at a pessimistic land fraction. The
+  width is what keeps the rim, the wrap, and a whole-world grid render things a
+  test can reach, and those are properties to protect rather than alpha
+  conveniences to outgrow. The width still appears in exactly two places: that
+  pair, and the compatibility tests. A literal `32767` anywhere else is a defect,
+  and gate 5 stays, because section 4.2's 18-bit contingency is the case both
+  exist for. **64-bit components are rejected**, not deferred.
 - **The canonical domain is `-WorldRadius <= q, r, s <= +WorldRadius`, and the
   extreme negative value of `Component` is not a coordinate** —
-  `-32767 .. 32767` at the alpha width, `math.MinInt16` excluded. This costs no
+  `-32767 .. 32767`, `math.MinInt16` excluded. This costs no
   tiles and it is the constraint that makes negation, `abs`, and the
   `int64` round trip total; `-math.MinInt16` and `|math.MinInt16|` are both
   silently wrong in Go, and `RimDistance` reads such a tile as lying outside the
@@ -146,9 +150,12 @@ Two things this does not license:
   player's settlement to a real coordinate somewhere else.
 - Compute `s`, mirror centers, differences, and every normalization
   intermediate in `int64`. **The lattice solve is the one place that widens
-  past `int64`** — its products and, at the shipping width, its determinant
-  overflow. Go wraps silently, so the overflow is a plausible wrong answer
-  rather than a panic. Use the exact 128-bit helper in `internal/mathx`.
+  past `int64`** — its products overflow, reaching `6.0e23`, because `NewCoord`
+  accepts any `int64` pair and the bound comes from the input rather than from
+  the world size. The determinant fits comfortably at this width; do not take
+  that as licence to narrow the solve. Go wraps silently, so the overflow is a
+  plausible wrong answer rather than a panic. Use the exact 128-bit helper in
+  `internal/mathx`.
 - **`Coord` has unexported fields and no constructor that skips
   normalization.** This is deliberate and load-bearing: it makes "values that
   normalize to the same coordinate identify the same tile" a property of the
@@ -196,8 +203,8 @@ These are the rules most likely to be violated by code that looks correct.
   not for polygon corners, not `HexSet`. Convert `Component` to `hexg.Hex`
   through one adapter function.
 - Nothing that touches generation may compute a world position in `float32`. At
-  the shipping width, `float32` spacing at the map's far corner is about 300
-  hexes.
+  the map's far corner `float32` spacing is about 165 feet, which is small
+  enough to pass a test at the origin and fail one at the rim.
 
 ## Noise and fields
 

@@ -353,12 +353,13 @@ func greedyReduce(q, r int64) (int64, int64) {
 // with M = 2N+1 and D = 3N^2 + 3N + 1, which is |det| and is also 1 + 3N(N+1),
 // the tile count of the canonical hexagon.
 //
-// This is the one place in the module that widens past int64. The products reach
-// 6e23 at the alpha component width and 4e28 at the shipping width, and at the
-// shipping width D alone does not fit in an int64. Go wraps signed overflow
-// silently, so an int64 solve returns a plausible wrong answer with nothing to
-// report it. Do not simplify it back, and do not simplify it because it happens
-// to fit at the alpha width. See DESIGN.md 7.1.
+// This is the one place in the module that widens past int64, and settling the
+// component width at 16 bits does not change that. NewCoord accepts any int64
+// pair, so the products reach 6.0e23 — the bound comes from the input domain, not
+// from the world size. D itself fits comfortably here, at 3.2e9; do not read that
+// as licence to narrow the solve, because it is the numerator that overflows. Go
+// wraps signed overflow silently, so an int64 solve returns a plausible wrong
+// answer with nothing to report it. See DESIGN.md 7.1 and appendix D.1.
 func latticeSolve(q, r int64) (int64, int64) {
 	n := WorldRadius
 	m := 2*n + 1

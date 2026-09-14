@@ -3,7 +3,7 @@
 **Module:** `github.com/mdhender/wgva`
 **Target language:** Go (1.26)
 **Coordinate system:** axial hex coordinates `(q, r)`
-**Component width:** signed 16-bit for alpha, signed 32-bit for the shipping world
+**Component width:** signed 16-bit, settled; see section 4.2
 **Hex scale:** 3-mile apothem
 **World origin:** `(0, 0)`
 **Primary goal:** Generate attractive, geographically coherent terrain on demand without exposing a practical map boundary.
@@ -52,12 +52,15 @@ document that was already written once.
    everything player-facing and everything persistent is deferred behind it.
    See sections 29.1 and 32.
 
-2. **32 bits is the shipping coordinate width, and 16 bits is the alpha one.**
+2. **16 bits is the coordinate width, and WGVA does not migrate off it.**
    The width is one centralized decision, not a property of the algorithms. WGVB
-   ran its whole implementation at `int16` deliberately, because a 3.2-billion-
-   tile world is one whose edges a test can actually reach, and it shipped
-   `int32` as the answer for a world players live in. WGVA does the same, in the
-   same order. 64-bit components are explicitly rejected: some internal
+   ran its whole implementation at `int16` because a 3.2-billion-tile world is
+   one whose edges a test can actually reach, and then planned a migration to
+   `int32` for the world players live in. **WGVA keeps the first half and drops
+   the second.** The arithmetic in section 4.2 is why: 3.2 billion hexes is more
+   world than the game can consume, by a factor nobody has to estimate carefully
+   to be convinced by, and the migration was a phase of work buying headroom that
+   was already there. 64-bit components remain explicitly rejected: some internal
    arithmetic needs 64 bits and some needs 128, but nothing a player ever reads
    does. See sections 4 and 7.2.
 
@@ -169,15 +172,18 @@ A tile is uniquely identified by its canonical axial coordinate.
 // single place the world's size is decided.
 type Component = int16
 
-// WorldRadius is N in section 7.1: the largest value a Component can hold.
-// It is math.MaxInt16 at the alpha width and math.MaxInt32 at the shipping
-// width, and it is paired with Component rather than chosen independently.
+// WorldRadius is N in section 7.1: the radius of the canonical hexagon, and
+// the bound every component is range-checked against. It is paired with
+// Component rather than chosen independently, and at the shipped width it is
+// also the largest value a Component can hold.
 const WorldRadius int64 = math.MaxInt16
 ```
 
 Go cannot compute the maximum of a signed type in a constant expression without
 `unsafe`, which section 22 forbids, so the pair is written out and pinned by a
-test rather than derived:
+test rather than derived. The test asserts both halves — that the radius fits the
+type, and that the type is no wider than the radius needs — because at the
+shipped width the pair is exactly tight:
 
 ```go
 func TestWorldRadiusMatchesComponent(t *testing.T) {
@@ -199,6 +205,15 @@ func TestWorldRadiusMatchesComponent(t *testing.T) {
 
 That is six lines and it fails the instant one half of the pair moves without
 the other, which is the only failure mode worth defending against here.
+
+> **Only the second assertion is width-specific.** It says the `Component` type
+> is not wider than `WorldRadius` needs, which is true because 16 bits is the
+> width and `32767` is its maximum. The 18-bit contingency in section 4.2 would
+> store a radius of `131071` in an `int32` and that assertion would have to go,
+> since the type would then be deliberately wider than the domain. Nothing else
+> in the module would change, because everything already range-checks against
+> `±WorldRadius` rather than against the type — which is the same discipline
+> section 4.1 asks for and the reason the contingency is cheap.
 
 **`Coord`'s fields are unexported and there is no exported constructor that
 skips normalization.**
@@ -250,15 +265,15 @@ invariant rather than hoping for one.
 ### 4.1 The canonical domain is symmetric
 
 `Component` is a two's-complement type, so it can represent one more negative
-value than positive: `math.MinInt16` at the alpha width, `math.MinInt32` at the
-shipping width. **That value is not a coordinate.** The canonical domain is
+value than positive: `math.MinInt16`. **That value is not a coordinate.** The
+canonical domain is
 
 ```text
 -WorldRadius <= q, r, s <= +WorldRadius
 ```
 
-so at the alpha width every component satisfies `-32767 <= v <= 32767` and the
-map is exactly symmetric about the origin. `NewCoord` never produces the extreme
+so every component satisfies `-32767 <= v <= 32767` and the map is exactly
+symmetric about the origin. `NewCoord` never produces the extreme
 negative value, the conversion from `int64` to `Component` rejects it, and a
 stored one is malformed data rather than a distant tile.
 
@@ -282,10 +297,10 @@ and all three are used in the generation path:
   every valid `v`, which is what lets the normalizer prove a value in range once
   and convert without re-checking.
 
-The same constraint applies verbatim at the shipping width —
-`-2147483647 <= q, r, s <= 2147483647`, with `math.MinInt32` excluded — and
-because both bounds are `±WorldRadius`, nothing in the code changes when the
-width does.
+The same constraint would apply verbatim at any other radius, because both
+bounds are `±WorldRadius` and neither names the type. That is what makes the
+18-bit contingency of section 4.2 a change to two constants rather than a change
+to the code.
 
 > This is the one place where the set of values a `Coord` may *hold* is smaller
 > than the set its fields can *represent*, which is why the range check in the
@@ -293,45 +308,104 @@ width does.
 > check cannot be skipped on the grounds that the value "came from a
 > `Component` already". Test it directly; see section 30.4.
 
-### 4.2 The component width is one decision, made twice
+### 4.2 The component width is settled at 16 bits
 
-`Component` is `int16` for the alpha and `int32` for the shipping world. Both
-widths are supported by the same code, and **the width appears in exactly two
-places**: the `Component`/`WorldRadius` pair above, which is one decision, and
-the compatibility tests. Nothing else may name a width — not a struct field, not
-a SQLite column type, not a hash input, not a bounds check. A literal `32767`
-anywhere outside those two places is a defect.
+**`Component` is `int16`, and that is the width WGVA goes live with.** There is
+no later migration to a wider one. The previous revision of this document
+deferred the shipping width to a phase of its own; that phase is removed, and
+this section is why.
 
-The reason to run the alpha at `int16` is that a 3.2-billion-tile world has
-edges a test can reach:
+The world a 16-bit component describes:
 
-- A scroll walk from the origin to the rim and back is a few thousand steps, so
-  the wrap, the rim profile, and the normalizer's stage-2 fix-up are all covered
-  by tests that finish in milliseconds rather than by argument.
-- The whole world is 65,535 hexes across, so `render.Grid` can draw a picture of
-  all of it at a coarse scale. At `int32` no image of the whole world exists at
-  any scale that fits in memory, and "does the rim look right everywhere" stops
-  being a question anybody can answer by looking.
-- Distribution tests (30.8) over a sample that is a meaningful fraction of the
-  world are affordable.
+| | |
+|---|---:|
+| `N` | `32,767` |
+| Canonical tiles | `3,221,127,169` |
+| Total area, square miles | `1.0042e11` |
+| Earth *surface* areas | ~510 |
 
-The reason to ship at `int32` is that the rim stops being reachable at all. See
-the table in section 7.2.
+The number that decides it is not the total, though, because most of a world is
+water. Against Earth's **land** area of about `57.3` million square miles:
 
-> **Changing the width changes world topology and is an algorithm version
-> change.** A world generated at `int16` cannot be reopened by a binary built at
-> `int32`, and the gate in section 27.5 must refuse it rather than reinterpret
-> the coordinates. The width is therefore recorded in the singleton world
-> metadata alongside the algorithm version, and the compatibility test asserts
-> that a file from the other width is rejected — the same way a WGVB file is.
+| Land fraction | Land, square miles | Earth land areas |
+|---:|---:|---:|
+| 20% | `2.01e10` | ~350 |
+| 30% | `3.01e10` | ~526 |
+| 40% | `4.02e10` | ~700 |
+
+A pessimistic land fraction still yields several hundred Earths of walkable
+ground. The migration to `int32` was a phase of work, an algorithm version bump,
+and a re-render of every acceptance sheet — spent to add headroom on top of
+that. No estimate of how fast a game consumes world has to be argued over for
+this to be the wrong trade; the starting number is already several hundred
+Earths.
+
+What the 16-bit width buys, which a wider one actively takes away:
+
+- **The rim is reachable.** About twenty-two years of continuous walking, so a
+  scroll walk from the origin to the rim and back is a few thousand steps. The
+  wrap, the rim profile, and the normalizer's stage-2 fix-up are covered by tests
+  that finish in milliseconds rather than by argument.
+- **The whole world fits in one image.** 65,535 hexes across, so `render.Grid`
+  can draw all of it at a coarse scale. "Does the rim look right everywhere" and
+  "do the continents cover the world plausibly" stay questions somebody can
+  answer by looking. At `int32` no image of the whole world exists at any scale
+  that fits in memory.
+- **Distribution tests over a meaningful fraction of the world are affordable**
+  (section 30.8).
+
+Those are not alpha conveniences that a real world would outgrow. They are how
+the world gets tuned, and they keep working for as long as the width does.
+
+**The width still appears in exactly two places** — the `Component`/`WorldRadius`
+pair above, and the compatibility tests. Nothing else may name a width: not a
+struct field, not a SQLite column type, not a hash input, not a bounds check. A
+literal `32767` anywhere else is still a defect. That discipline costs nothing to
+keep and it is what makes the contingency below a two-line change instead of an
+audit.
+
+#### The 18-bit contingency
+
+**If play testing shows the world being explored faster than this section
+assumes, the answer is 18 bits, not 32.** It has been costed and it is not
+planned work:
+
+| | 16-bit, shipped | 18-bit, if needed |
+|---|---:|---:|
+| `N` | `32,767` | `131,071` |
+| Canonical tiles | `3,221,127,169` | `51,539,214,337` |
+| Land at 30%, Earth land areas | ~526 | ~8,400 |
+| Center-to-rim, miles | `196,602` | `786,426` |
+| Years walking at 24 miles a day | ~22 | ~90 |
+| Storage type | `int16` | `int32` |
+
+Sixteen times the world for the same code and four times the walk to the rim,
+which is the axis that would actually be under pressure. The rim stays reachable
+by a test and the whole world stays drawable, so nothing in the paragraph above
+is given up.
+
+The one thing that changes shape is the `Component`/`WorldRadius` pairing: the
+radius would be stored in an `int32` deliberately wider than the domain, so the
+second half of the pinning test in section 4 would have to go. Everything else
+already range-checks against `±WorldRadius` rather than against the type.
+
+**Changing the width changes world topology and is an algorithm version change.**
+A world generated at one width cannot be reopened by a binary built at another,
+and gate 5 of section 27.5 must refuse it rather than reinterpret the
+coordinates. The width is therefore recorded in the singleton world metadata
+alongside the algorithm version and hashed into the configuration fingerprint,
+and the compatibility test asserts that a file from another width is rejected —
+the same way a WGVB file is. **That gate is not removed along with the migration.**
+It is the thing that makes the contingency safe to exercise later, and it is
+cheap to keep correct now.
 
 > **64-bit components are rejected, not deferred.** Widening `Component` to
 > `int64` multiplies the tile count by `4e18` and buys nothing a player can
 > perceive — they would still never reach the rim, and every coordinate they
 > read would grow to twenty digits. The costs are real: the lattice solve in
 > section 7.1 would need 256-bit intermediates, the database would carry eight
-> bytes per component instead of two or four in every overlay row, and the rim
-> test would no longer fit in a register pair. Section 34.5 is where a genuinely
+> bytes per component instead of two in every overlay row, and the rim test
+> would no longer fit in a register pair. Section 34.5 is where a genuinely
 > different topology would go; this is not it.
 
 ### 4.3 Tile
@@ -505,16 +579,22 @@ func AxialToWorld(c Coord) Vec2
 
 All continuous fields sample from this one coordinate system. This avoids the distortion caused by feeding `q` and `r` directly into Cartesian noise.
 
-> **World space is `float64` at every scale, and at the shipping width that
-> matters.** The far corner of an `int32` map is about `2.6e10` miles from the
-> origin. A `float64` has 52 bits of mantissa, so the spacing of representable
-> values there is about `4e-6` miles — roughly a quarter of an inch against a
-> 6-mile hex. Ample headroom, but only in `float64`: in `float32` the spacing at
-> that distance is about 2,000 miles, which is 300 hexes, and every tile in the
-> outer world would collapse onto its neighbors. Nothing that touches generation
-> may compute a world position in `float32`. This is a defect the alpha width
-> would hide completely and the shipping width would expose everywhere, which is
-> the argument for stating it now.
+> **World space is `float64` at every scale, and `float32` is not permitted
+> anywhere near generation.** The far corner of the map is about `295,000` miles
+> from the origin. A `float64` has 52 bits of mantissa, so the spacing of
+> representable values there is about `6e-11` miles — four millionths of an inch
+> against a 6-mile hex, which is headroom nothing will consume.
+>
+> In `float32` the spacing at that distance is `0.03` miles, about 165 feet. That
+> is half a percent of a hex rather than the 300 hexes an `int32` map would have
+> suffered, so the failure is quieter than the previous revision of this document
+> described — and quieter is worse, not better. It is far below the shortest
+> wavelength the grid can carry (section 9.3), so it will not show as a visible
+> artifact; what it does is make the far half of the world disagree with the near
+> half about how much precision a position has, which means goldens that pass at
+> the origin and fail at the rim, and bit-exactness claims that hold on the
+> window somebody looked at. **Nothing that touches generation may compute a
+> world position in `float32`.** At 18 bits the same spacing is 660 feet.
 
 ### 7.1 Wrapped coordinate domain
 
@@ -527,9 +607,8 @@ Let `N = WorldRadius`. The canonical map is the hexagonal cube-coordinate domain
 q + r + s = 0
 ```
 
-`-N` is `-32767` at the alpha width, not `math.MinInt16`; section 4.1 is why the
-extreme negative value of the component type is excluded and what the symmetry
-buys.
+`-N` is `-32767`, not `math.MinInt16`; section 4.1 is why the extreme negative
+value of the component type is excluded and what the symmetry buys.
 
 For cube coordinates satisfying `q + r + s = 0`, hex distance from the origin is
 exactly `max(|q|, |r|, |s|)`, so this domain is the hexagon of radius `N` and
@@ -588,20 +667,26 @@ The normalizer runs in three stages, because `NewCoord` accepts any `int64` pair
    directly; rounding each to the nearest integer leaves a residual within hex
    distance `2N+1` of the origin, which stage 2 then finishes.
 
-> **The lattice solve is the one place that widens past `int64`.** Products such
-> as `(2N+1) * q` reach `6e23` at the alpha width and `4e28` at the shipping
-> width for `|q|` near `int64` range, and at `int32` the basis determinant alone
-> — `3*(2N+1)^2`, about `5.5e19` — already does not fit. **Go wraps signed
-> integer overflow silently**, so a solve written in `int64` produces a plausible
-> wrong answer rather than a panic; that is the exact failure mode the rule in
-> section 4 exists to prevent, and it is the mirror image of the hazard a Rust
-> port hits, where the same code panics in a debug build. The solve is computed
-> in exact 128-bit arithmetic by a small helper in `internal/mathx` built on
-> `math/bits.Mul64`, `Add64`, `Sub64`, and `Div64`; the small residual returns to
-> `int64`. `math/big` is an acceptable alternative in this branch and nowhere
-> else — it allocates, and this branch is cold. Do not "simplify" the solve back
-> to `int64`, and do not simplify it because it happens to fit at the alpha
-> width.
+> **The lattice solve is the one place that widens past `int64`, and settling
+> the width at 16 bits does not change that.** `NewCoord` accepts any `int64`
+> pair, so products such as `(2N+1) * q` reach `6.0e23` for `|q|` near `int64`
+> range — seventy thousand times what an `int64` holds. The determinant `D` does
+> fit comfortably at this width, at `3.2e9`; it was the `int32` world that would
+> have overflowed it, and that argument retires with the migration. **The product
+> argument does not, and it is the one that matters**, because it is reached by
+> the input domain rather than by the world size.
+>
+> **Go wraps signed integer overflow silently**, so a solve written in `int64`
+> produces a plausible wrong answer rather than a panic; that is the exact
+> failure mode the rule in section 4 exists to prevent, and it is the mirror
+> image of the hazard a Rust port hits, where the same code panics in a debug
+> build. The solve is computed in exact 128-bit arithmetic by a small helper in
+> `internal/mathx` built on `math/bits.Mul64`, `Add64`, `Sub64`, and `Div64`; the
+> small residual returns to `int64`. `math/big` is an acceptable alternative in
+> this branch and nowhere else — it allocates, and this branch is cold. Do not
+> "simplify" the solve back to `int64` on the grounds that the determinant now
+> fits; the numerator is what overflows. See appendix D.1 for the bounds written
+> out.
 
 The three stages exist in this order for a reason worth keeping: staging the cheap cases first means the exotic arithmetic sits in a branch that ordinary gameplay never takes, and a bug in it cannot be reached by a neighbor step. Test it directly rather than hoping to reach it (section 30.4).
 
@@ -610,10 +695,9 @@ periodic under the mirror translations on a best-effort basis and documented any
 remainder as an accepted world-warp seam. WGVB implemented that and measured
 what it costs to close: the wrap period is `2N+1` hexes, so every wavelength in
 the configuration — and every fbm octave derived from it through the lacunarity
-— would have to be drawn from the divisors of that number. At `int16` the period
-factors as `3 * 5 * 17 * 257`; at `int32` it factors as `3 * 5 * 17 * 257 *
-65537`, which is no more usable. The constraint is real, joint, and cuts straight
-across the multi-scale table of section 10.
+— would have to be drawn from the divisors of that number, which is `65,535`, and
+it factors as `3 * 5 * 17 * 257`. The constraint is real, joint, and cuts
+straight across the multi-scale table of section 10.
 
 Section 15.1 retires the obligation instead of paying it. The rim covers the seam
 with forced terrain and closes it to play, so a discontinuity that is never
@@ -653,29 +737,33 @@ For a cube-coordinate hexagon of radius `N`, the number of tiles is:
 tiles = 1 + 3*N*(N+1)
 ```
 
-| | `int16`, the alpha | `int32`, shipping |
+| | 16-bit, shipped | 18-bit, the contingency |
 |---|---:|---:|
-| `N` | `32,767` | `2,147,483,647` |
-| Canonical tiles | `3,221,127,169` | `13,835,058,048,839,712,769` |
-| Total area, square miles | `1.0042e11` | `4.3133e20` |
-| Earth surface areas | ~510 | ~2.19 trillion |
-| Center-to-center radius, miles | `196,602` | `12,884,901,882` |
-| Opposite-corner span, miles | `393,204` | `25,769,803,764` |
-| Days to walk origin to rim at 24 miles | ~8,200 | ~537,000,000 |
+| `N` | `32,767` | `131,071` |
+| Canonical tiles | `3,221,127,169` | `51,539,214,337` |
+| Total area, square miles | `1.0042e11` | `1.6068e12` |
+| Earth surface areas | ~510 | ~8,159 |
+| Land at 30%, Earth land areas | ~526 | ~8,417 |
+| Center-to-center radius, miles | `196,602` | `786,426` |
+| Opposite-corner span, miles | `393,204` | `1,572,852` |
+| Days to walk origin to rim at 24 miles | ~8,192 | ~32,768 |
 
 At a 3-mile apothem each tile covers `18*sqrt(3)`, approximately `31.1769`, square miles, at either width.
 
-Two consequences worth writing down:
+Three consequences worth writing down:
 
-- **At the alpha width the rim is reachable** — about twenty-two years of
-  continuous walking — which is precisely why it is the width to develop and
-  test at. At the shipping width nothing reaches it, and the rim of section 15.1
-  exists for the map and the renderer rather than for the walker.
-- **At the shipping width the tile count does not fit in an `int64`.** It
-  exceeds `math.MaxInt64` by about 50%. Any expression that computes it — a
-  progress total, a percentage, a test — must use `uint64`. This is a small
-  thing that will be got wrong once, and it will be got wrong during the width
-  change rather than before it, because at `int16` an `int64` is comfortable.
+- **The rim is reachable**, at about twenty-two years of continuous walking. That
+  is the property section 4.2 declines to trade away, and it is why the rim of
+  section 15.1 is a feature a test can visit rather than a guarantee nobody
+  collects.
+- **The tile count fits in an `int64` with room to spare**, at `3.2e9`, and so
+  does the lattice determinant, which is the same number (appendix D.1). Prefer
+  `uint64` anyway for any expression that counts tiles: it costs nothing, and the
+  18-bit contingency multiplies the count by sixteen.
+- **Neither width makes the world small.** The comparison worth holding on to is
+  not tiles but walkable ground: at a pessimistic 30% land fraction the shipped
+  world carries about 526 times Earth's land area, and the contingency carries
+  about 8,400.
 
 
 ---
@@ -1228,10 +1316,10 @@ Consequences elsewhere in this document:
   version change.
 - **`ClosedHexes = 0` and `FalloffHexes = 0` is a valid configuration** and
   restores the raw wrapped world exactly. Keep it working: it is how the wrap
-  tests in section 30.10 see the seam they are asserting on, and the alpha width
-  is the only setting where looking at it is practical.
-- **At the alpha width the rim is a feature you can visit**; at the shipping
-  width it is a guarantee nobody collects. Tune it at `int16`.
+  tests in section 30.10 see the seam they are asserting on.
+- **The rim is a feature you can visit**, at about twenty-two years of walking
+  (section 7.2), which is what makes "does the rim look right everywhere" a
+  question somebody answers by looking rather than by argument.
 
 ---
 
@@ -1418,7 +1506,7 @@ package wgva
 
 type Seed uint64
 
-type Component = int16 // int32 for the shipping world; section 4.2
+type Component = int16 // settled; section 4.2
 
 type Coord struct{ /* unexported fields; see section 4 */ }
 
@@ -1599,7 +1687,7 @@ Each algorithm version defines a canonical serialization of its effective config
 fingerprint = SHA-256( algorithmVersion LE bytes || componentWidthBits LE bytes || canonical CBOR of Config )
 ```
 
-The component width is in the fingerprint because it is part of world topology (section 4.2), and a world file that says `int16` must never validate against a binary built at `int32`.
+The component width is in the fingerprint because it is part of world topology (section 4.2). The width is settled at 16 bits, so this costs one constant and guards nothing today; it is kept because the 18-bit contingency in section 4.2 is the case where a world file that says `int16` must never validate against a binary built wider, and a fingerprint that had to gain an input later would invalidate every world in existence to do it.
 
 > **The fingerprint hashes what was *declared*, not what was *run*.** Every input
 > above is a number somebody wrote down; none of them is the generator's code.
@@ -1845,12 +1933,12 @@ There is no Go flag that relaxes floating-point semantics, which is a genuine ad
 
 The generator must work correctly with no cache. Applications may cache individual tiles, elevation samples, region parameter blocks, or rendered chunks.
 
-Region parameter caching is the likeliest first optimization, since many nearby tiles reuse the same anchors:
+Region parameter caching is the likeliest first optimization, since many nearby tiles reuse the same anchors. The key is a region index rather than a coordinate, so it is `int64` to match what `Coord.Cell` returns and names no component width:
 
 ```go
 type RegionCoord struct {
-    Q int32
-    R int32
+    Q int64
+    R int64
 }
 ```
 
@@ -1989,7 +2077,7 @@ type OpenError struct {
 
 No gate may perform an application write before it passes. Older generator versions are rejected unless the binary deliberately retains their implementations. **A generator incompatibility must never be handled by silently regenerating the world with current rules** — every overlay coordinate would then point at terrain that no longer exists there, silently, because a coordinate still resolves.
 
-Gate 5 is new in this revision and exists because of section 4.2: the alpha and the shipping world are the same code at two widths, and a file from one must not open under the other.
+Gate 5 exists because of section 4.2: two widths would be the same code over different topologies, and a file from one must not open under the other. The migration that motivated it is gone and the gate is not, because it is what makes the 18-bit contingency safe to exercise, and a gate written after the fact is a gate written against worlds that already exist.
 
 ### 27.6 What is authoritative and what is not
 
@@ -2229,7 +2317,7 @@ it through.
 
 One pixel per hex — or N, at an explicit scale — so that a million tiles can be looked at in one image. `Viewport` is a rectangle of even-`q` offset cells and `Viewport.CoordAt` is the offset conversion, so the grid is the same window walk with hex hit testing dropped, sharing one function with the hex path. It lives in `render` as `RenderGrid`, and `wgva-map --grid` draws it too, which is how the sheets under `docs/renders/` are made.
 
-At the alpha component width the grid can draw a recognizable picture of the *whole world* at a coarse scale, which is the other reason to develop at `int16`: "is the rim right everywhere" and "do the continents cover the world plausibly" are questions you can answer by looking. At the shipping width no such image exists.
+The grid can draw a recognizable picture of the *whole world* at a coarse scale, which is one of the reasons section 4.2 settles the width where it does: "is the rim right everywhere" and "do the continents cover the world plausibly" are questions somebody answers by looking. At `int32` no such image would have existed at any scale that fits in memory.
 
 What it distorts: a hex row's centers are `sqrt(3) r` apart and a column's are `1.5 r`, so drawing both as one pixel stretches the image vertically by about 15% and flattens the half-hex column stagger. That is the price of the view and it is stated on the page.
 
@@ -2693,7 +2781,7 @@ Compare physical fields on corresponding tiles at all six wrapped edge pairs. A 
 
 Smoothness across the seam is a separate claim and is **not** asserted, because section 7.1 no longer promises it. What is asserted instead is that the discontinuity exists only where it is expected to, and that a future change that makes the fields periodic fails this test loudly rather than passing quietly — so the documentation and the code cannot drift apart.
 
-These tests run with the rim switched off, which is the configuration that exposes the seam. At the alpha component width they can walk to it.
+These tests run with the rim switched off, which is the configuration that exposes the seam. At the shipped component width they can walk to it.
 
 ### 30.11 Database Compatibility
 
@@ -2734,7 +2822,7 @@ The rim of section 15.1 is cheap to test and easy to get subtly wrong:
 - `ClosedHexes = 0, FalloffHexes = 0` reproduces the unrimmed world **bit for
   bit**, which is what lets sections 30.10 and the goldens coexist with the rim.
 
-Run these at the alpha width, where a radial walk to the rim is a few thousand steps.
+A radial walk to the rim is a few thousand steps at the shipped width, which is what keeps these affordable.
 
 ---
 
@@ -2806,10 +2894,11 @@ A number from this harness is meaningless beside a number from a different build
 
 - **The algorithm version**, because a version bump can change how many field
   evaluations a tile costs.
-- **The component width.** An `int16` world and an `int32` world run the same
-  code, but the normalizer's fast path and the rim test both touch different
-  magnitudes, and the tile counts they are quoted against differ by ten orders of
-  magnitude.
+- **The component width.** It is settled at 16 bits, so today this is a constant
+  rather than a variable — state it anyway, because the normalizer's fast path
+  and the rim test both touch magnitudes that scale with it, and a figure quoted
+  without it stops being comparable the moment section 4.2's contingency is
+  exercised.
 - **The configuration**, because octave counts are per field (section 9.3) and
   the ladder length is most of the arithmetic. A figure measured under the
   default configuration should say so, with its fingerprint.
@@ -2893,7 +2982,7 @@ Implement the rim profile of section 15.1 — distance, falloff, forced band, th
 Settling them is a specific act, not a feeling: write the fingerprint of the default configuration into `config/fingerprint_test.go` as a constant. From that moment, moving any default fails a test, and updating the constant is the compatibility decision.
 
 > **Exit:** a radial walk to the rim shows a shelving coast or a rising
-> icefield and then forced terrain, at the alpha component width. The whole world
+> icefield and then forced terrain. The whole world
 > can be drawn in one grid image and the rim is uniform all the way round.
 > `ClosedHexes = 0` reproduces the unrimmed world bit for bit. The default
 > configuration has a written-down fingerprint.
@@ -2912,14 +3001,32 @@ Everything in this phase exists because a *game* needs it. None of it is needed 
 > produce varied but coherent maps and player PNGs, and the CLI and both web
 > front ends agree byte for byte.
 
-### Phase 9 — The component width change
+### There is no phase 9
 
-Change `Component` to `int32`, bump `AlgorithmVersion`, and run everything again.
+The previous revision of this plan ended with a component width change: `int16`
+through development, `int32` to ship. **That phase is removed and the width is
+settled at 16 bits.** Section 4.2 carries the arithmetic; the short version is
+that 3.2 billion hexes is several hundred Earths of walkable ground at a
+pessimistic land fraction, and the migration was a topology change, an algorithm
+version bump, and a re-render of every acceptance sheet bought in exchange for
+headroom that was already there.
 
-It is its own phase because it is a topology change and deserves to be a separate commit with a separate set of renders. Expect three things to surface, all of them named already: the tile count outgrowing `int64` (section 7.2), the lattice solve's determinant outgrowing `int64` (section 7.1), and any `float32` that crept into a world-space calculation (section 7). Expect the tests that walk to the rim to become impractical, which is why they were written at the alpha width.
+Phase 8 is therefore the last phase, and what it exits into is a shipping world
+rather than a staging post.
 
-> **Exit:** the shipping world generates, renders, and persists; a world file
-> from the alpha width is refused by gate 5 rather than misread.
+Two things survive the removal and must not be tidied away with it:
+
+- **Gate 5**, which refuses a world generated at a different component width. It
+  now guards a contingency rather than a plan, and a gate written after worlds
+  exist is a gate written too late.
+- **The two-places rule** for naming a width (section 4.2). It is what would make
+  the 18-bit contingency a two-constant change rather than an audit.
+
+> **If play testing shows the world being explored faster than section 4.2
+> assumes, the answer is 18 bits, not 32**: sixteen times the world, four times
+> the walk to the rim, `int32` storage, and the rim still reachable by a test.
+> That is a costed contingency, not scheduled work, and nothing in this plan
+> depends on it.
 
 ---
 
@@ -3054,8 +3161,8 @@ The first major WGVA milestone is complete when all of the following hold:
   terrain.
 - Negative coordinates work correctly.
 - All six world edges wrap correctly and the seam is covered.
-- The world can be rendered in arbitrary windows for inspection, and at the alpha
-  width in its entirety.
+- The world can be rendered in arbitrary windows for inspection, and in its
+  entirety at a coarse scale.
 - Generating a distant tile does not require generating the intervening world.
 - A non-canonical `Coord` cannot be constructed outside the package.
 - The configuration that produced any picture can be recovered from a file with a
@@ -3330,8 +3437,9 @@ If `bbolt` is ever adopted, the required changes are bounded and known:
 - Write the `Coord` key encoding by hand rather than relying on any library's
   tuple encoding, so on-disk key bytes are pinned by our code. Encode each
   component big-endian with the sign bit flipped — `uint16(q) ^ 0x8000` at the
-  alpha width, `uint32(q) ^ 0x80000000` at the shipping width — so lexicographic
-  byte order matches numeric order and range scans work.
+  shipped width, `uint32(q) ^ 0x80000000` if section 4.2's contingency is ever
+  exercised — so lexicographic byte order matches numeric order and range scans
+  work.
 - Pin the version exactly and treat a major upgrade as a format migration.
 - Sections 30.11 and 27.3 survive unchanged in substance.
 
@@ -3396,22 +3504,29 @@ residual_r = r + a*N + b*M
 These are the bounds that make the solve safe. `DivRoundPos` panics if either of
 the middle two is violated and the residual bound has a test of its own, so the
 tests drive them with inputs at both ends of `int64` rather than taking them on
-faith:
+faith. The contingency column is section 4.2's, and is here because the solve is
+the one piece of arithmetic that would need re-checking if the width ever moved:
 
-| | alpha, `N = 32,767` | shipping, `N = 2,147,483,647` |
+| | 16-bit, shipped | 18-bit, if needed |
 |---|---:|---:|
-| `D` | `3,221,127,169` | `13,835,058,048,839,712,769` |
-| `D` against `MaxUint64` | negligible | 75% of it |
-| Numerator high word, at most `(3N+2)/2` | `49,151` | `3,221,225,471` |
-| `\|a\|`, `\|b\|`, at most about `2^63/N` | `2.8e14` | `4.3e9` |
-| Residual hex norm, at most `2N+1` | `65,535` | `4,294,967,295` |
+| `D` | `3,221,127,169` | `51,539,214,337` |
+| Numerator, at most `(3N+2)*2^63` | `6.0e23` | `2.4e24` |
+| Numerator high word, at most `(3N+2)/2` | `49,151` | `196,607` |
+| `\|a\|`, `\|b\|`, at most about `2^63/N` | `2.8e14` | `7.0e13` |
+| Residual hex norm, at most `2N+1` | `65,535` | `262,143` |
 
-Two of those rows are the whole reason the solve is written this way. `D` does
-not fit in an `int64` at the shipping width but does fit in a `uint64` with a
-quarter of the range to spare, which is what makes a 128-by-64 division the right
-shape rather than full 128-bit arithmetic. And the numerator's high word stays
-far below `D` at either width, which is the precondition `math/bits.Div64`
-panics on — so the cold branch cannot become a panic in the field.
+**The second row is the whole reason the solve is written this way**, and it is
+worth being precise about which argument survived the width decision and which
+did not. `D` fits in an `int64` at both widths with room to spare; the previous
+revision's `int32` world was the one where it did not, and that argument retired
+with the migration. The numerator does not fit at any width, because it is
+`(2N+1)` times an arbitrary `int64` input rather than something the world size
+bounds. A solve that widened only where the determinant demanded it would be
+wrong here, and wrong silently.
+
+The numerator's high word stays far below `D`, which is the precondition
+`math/bits.Div64` panics on — so the cold branch cannot become a panic in the
+field.
 
 The residual bound falls out of the rounding: `a` and `b` are each within `0.5`
 of the exact real solution, so the residual is at most
@@ -3469,9 +3584,11 @@ Two details are easy to get wrong and are worth naming:
   — each of which removes the `2^64` an unsigned reading of a negative operand
   implicitly added.
 - **The tie comparison must not double the remainder.** `2*rem >= d` overflows a
-  `uint64` when `d` is above `2^63`, which it is at the shipping width. Compare
-  `rem >= d - rem` instead; `rem < d` is guaranteed, so the subtraction cannot
-  underflow.
+  `uint64` when `d` is above `2^63`. No shipped or contingency width puts `D`
+  there — the `int32` world would have — so this one is defensive rather than
+  load-bearing, and it is kept because it costs a subtraction and the alternative
+  is a bug that only a width change would reveal. Compare `rem >= d - rem`
+  instead; `rem < d` is guaranteed, so the subtraction cannot underflow.
 
 `DivRoundPos` panics on a zero divisor and on a quotient that does not fit, both
 of which are invariants of the solve rather than conditions a caller answers. The

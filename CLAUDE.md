@@ -104,9 +104,10 @@ non-canonical coordinate cannot be built outside the package and `==`, map keys,
 and sorting are automatically correct for tile identity. The zero value is the
 origin, which is canonical.
 
-The world is a wrapped hexagon of radius `WorldRadius`, paired with `Component`:
-`int16` for the alpha (edges a test can walk to, whole world drawable in one
-grid image) and `int32` for shipping. The canonical domain excludes the extreme
+The world is a wrapped hexagon of radius `WorldRadius`, paired with `Component`,
+which is `int16` and stays `int16` — edges a test can walk to, whole world
+drawable in one grid image, and about 526 times Earth's land area at a 30% land
+fraction. There is no migration to a wider width. The canonical domain excludes the extreme
 negative value of the component type, which is what makes negation and `abs`
 total. The wrap seam is covered by the rim rather than smoothed, which is why
 the fields owe no periodicity.

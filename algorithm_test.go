@@ -10,6 +10,13 @@ import (
 
 // TestWorldRadiusMatchesComponent pins the one decision the world's size is made
 // of. It fails the instant one half of the pair moves without the other.
+//
+// Only the second assertion is width-specific: it says the Component type is no
+// wider than WorldRadius needs, which is true because 16 bits is the settled
+// width and 32767 is its maximum. DESIGN.md 4.2's 18-bit contingency would store
+// a radius of 131071 in an int32 and that assertion would have to go, since the
+// type would then be deliberately wider than the domain. Nothing else changes,
+// because everything else range-checks against ±WorldRadius.
 func TestWorldRadiusMatchesComponent(t *testing.T) {
 	if int64(Component(WorldRadius)) != WorldRadius {
 		t.Fatal("WorldRadius does not fit in a Component")
@@ -26,6 +33,15 @@ func TestWorldRadiusMatchesComponent(t *testing.T) {
 // TestComponentWidthBitsMatchesComponent keeps the width recorded in world
 // metadata and hashed into the fingerprint in step with the type. The reference
 // counts bytes through reflect rather than repeating the derivation.
+//
+// This is width-specific for the same reason the pinning test above is.
+// ComponentWidthBits derives the *domain* width from WorldRadius, which is what
+// the fingerprint wants — it is what distinguishes one world topology from
+// another. At the shipped width the domain and the storage type are the same
+// size, so tying them together here is a free extra check. Under DESIGN.md
+// 4.2's 18-bit contingency they part company: the function would report 18 and
+// the type would be 32 bits wide, which is correct on both counts, and this
+// assertion would be the one to drop.
 func TestComponentWidthBitsMatchesComponent(t *testing.T) {
 	bitsInType := 8 * uint32(reflect.TypeFor[Component]().Size())
 	if got := ComponentWidthBits(); got != bitsInType {
@@ -60,8 +76,9 @@ func TestExtremeNegativeIsNotACoordinate(t *testing.T) {
 // value costs no tiles: the domain is the hexagon of radius N, whose size is
 // 1 + 3N(N+1), and that is also the index of the wraparound lattice.
 func TestTileCount(t *testing.T) {
-	// uint64 throughout: at the shipping width the count exceeds math.MaxInt64
-	// by about half.
+	// uint64 throughout. The count fits an int64 comfortably at this width, at
+	// 3.2e9; uint64 costs nothing and does not have to be revisited if
+	// DESIGN.md 4.2's contingency is ever exercised.
 	n := uint64(WorldRadius)
 	tiles := 1 + 3*n*(n+1)
 
