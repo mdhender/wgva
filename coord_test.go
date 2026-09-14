@@ -421,6 +421,31 @@ func TestNormalizeStage2(t *testing.T) {
 	}
 }
 
+// TestNormalizeStage2FallsThroughToStage3 covers the seam between the stages:
+// an input inside the greedy-safe bound, so stage 2 is entered, but far enough
+// out that the step limit runs out before it is canonical. It is the only path
+// where stage 2 runs and does not decide the answer. See DESIGN.md appendix D.2.
+func TestNormalizeStage2FallsThroughToStage3(t *testing.T) {
+	rng := rand.New(rand.NewPCG(0x5747_5641, 14))
+	for range 200 {
+		q := greedySafeBound - rng.Int64N(1<<20)
+		r := -greedySafeBound + rng.Int64N(1<<20)
+
+		if abs64(q) > greedySafeBound || abs64(r) > greedySafeBound {
+			t.Fatalf("(%d, %d) is outside the greedy-safe bound; stage 2 would be skipped", q, r)
+		}
+		if gq, gr := greedyReduce(q, r); isCanonical(gq, gr) {
+			t.Fatalf("greedyReduce finished from (%d, %d); the test is not covering the fall-through", q, r)
+		}
+
+		got := NewCoord(q, r)
+		if !isCanonical(int64(got.Q()), int64(got.R())) {
+			t.Fatalf("NewCoord(%d, %d) = %v, not canonical", q, r, got)
+		}
+		assertSameCoset(t, q, r, got)
+	}
+}
+
 // TestNormalizeStage3 exercises the lattice solve directly with inputs chosen
 // for it. No coordinate the program produces reaches this branch, which is
 // exactly why it needs its own inputs and an independently computed answer.

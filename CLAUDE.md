@@ -4,11 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-This repository is **design-stage**. `version.go` is the only Go file; none of
-the packages described below exist yet. `DESIGN.md` is the specification and
-`AGENTS.md` is the working guidance, and both are far ahead of the code. Treat a
-disagreement between them and the code as a gap to fill, not as documentation
-drift to correct.
+**Phase 1 has landed.** The root `wgva` package carries coordinates, the
+wraparound normalizer, hashing, and the `Config`/`Generator` skeleton, and
+`internal/mathx` carries the floor helpers, `Mul`, and the exact 128-bit
+arithmetic. Nothing else in the layout below exists yet — no fields, no noise, no
+`render`, `config`, `view`, `store`, or `cmd`.
+
+`DESIGN.md` is the specification and `AGENTS.md` is the working guidance, and
+both are still well ahead of the code. Treat a disagreement between them and the
+code as a gap to fill, not as documentation drift to correct — except where
+`DESIGN.md` appendix D says otherwise, which records what the implementation
+settled and is behind the code by construction.
 
 `DESIGN.md` section 32 is the build order, and it is deliberate: coordinates and
 hashing, then fields **and the terrain tuning tool**, then regions, elevation,

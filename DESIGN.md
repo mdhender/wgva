@@ -184,13 +184,20 @@ func TestWorldRadiusMatchesComponent(t *testing.T) {
     if int64(Component(WorldRadius)) != WorldRadius {
         t.Fatal("WorldRadius does not fit in a Component")
     }
-    if int64(Component(WorldRadius+1)) == WorldRadius+1 {
+    // Through a variable. Component(WorldRadius+1) as a constant expression
+    // does not compile: Go evaluates constant expressions in arbitrary
+    // precision and rejects a conversion that does not fit, so the overflow
+    // this line is looking for is a build error rather than a value. That is a
+    // weaker check — it fires on the pair being written down wrongly, not on
+    // the pair being wrong — and it is not the one this test is making.
+    over := WorldRadius + 1
+    if int64(Component(over)) == over {
         t.Fatal("WorldRadius is smaller than the Component can hold")
     }
 }
 ```
 
-That is four lines and it fails the instant one half of the pair moves without
+That is six lines and it fails the instant one half of the pair moves without
 the other, which is the only failure mode worth defending against here.
 
 **`Coord`'s fields are unexported and there is no exported constructor that
@@ -566,6 +573,16 @@ The normalizer runs in three stages, because `NewCoord` accepts any `int64` pair
    point no center improves is already canonical. Every coordinate the rest of
    the program actually produces — a neighbor, a scroll step, a region anchor, a
    rotation — lands here within a handful of steps.
+
+   **Stage 2 also has an upper bound on its input, and it is not the iteration
+   count.** Measuring `max(|q|, |r|, |s|)` means computing `q + r`, so a pair
+   near the ends of `int64` overflows *before* any mirror center has been
+   subtracted — one step earlier than the hazard the stage-3 note below
+   describes, and with the same silence. Stage 2 is therefore entered only when
+   both components are within a margin of the type: `2^61` in the
+   implementation, which is far above anything the program produces and far
+   below where the sum can wrap. Anything larger skips to stage 3, which is
+   where it belongs anyway.
 3. **Lattice solve, for wild input only.** Mirror centers `0` and `1` generate
    the wraparound lattice. Inverting that two-vector basis gives the multiples
    directly; rounding each to the nearest integer leaves a residual within hex
@@ -698,27 +715,35 @@ func domain(name string) uint64 {
 }
 
 const (
-    DomContinentalness    uint64 = 0x... // domain("continentalness")
-    DomRegionalElevation  uint64 = 0x... // domain("regional-elevation")
-    DomRelief             uint64 = 0x... // domain("relief")
-    DomTerrainDetail      uint64 = 0x... // domain("terrain-detail")
-    DomTemperature        uint64 = 0x... // domain("temperature")
-    DomMoisture           uint64 = 0x... // domain("moisture")
-    DomMoistureVariation  uint64 = 0x... // domain("moisture-variation")
-    DomRegionStyle        uint64 = 0x... // domain("region-style")
-    DomRidgeOrientation   uint64 = 0x... // domain("ridge-orientation")
-    DomRidgeStructure     uint64 = 0x... // domain("ridge-structure")
-    DomBasin              uint64 = 0x... // domain("basin")
-    DomBasinRegional      uint64 = 0x... // domain("basin-regional")
-    DomBasinLocal         uint64 = 0x... // domain("basin-local")
-    DomVolcanic           uint64 = 0x... // domain("volcanic")
-    DomWarpX              uint64 = 0x... // domain("warp-x")
-    DomWarpY              uint64 = 0x... // domain("warp-y")
-    DomDetailWarpX        uint64 = 0x... // domain("detail-warp-x")
-    DomDetailWarpY        uint64 = 0x... // domain("detail-warp-y")
-    DomFieldOffset        uint64 = 0x... // domain("field-offset")
+    DomContinentalness   uint64 = 0xe6a3e327f10250f5 // domain("continentalness")
+    DomRegionalElevation uint64 = 0xe3b0ad5b632039e6 // domain("regional-elevation")
+    DomRelief            uint64 = 0xfa189c4daf367720 // domain("relief")
+    DomTerrainDetail     uint64 = 0xa90f24aae7b9a828 // domain("terrain-detail")
+    DomTemperature       uint64 = 0x556575c1ce107955 // domain("temperature")
+    DomMoisture          uint64 = 0x4532a0329655240f // domain("moisture")
+    DomMoistureVariation uint64 = 0x2427b6a41708b52f // domain("moisture-variation")
+    DomRegionStyle       uint64 = 0x41156f2ba1d9a7d5 // domain("region-style")
+    DomRidgeOrientation  uint64 = 0x0f5bac8866b1037b // domain("ridge-orientation")
+    DomRidgeStructure    uint64 = 0xe29a7e331d9ba86c // domain("ridge-structure")
+    DomBasin             uint64 = 0xd6e851826dfb0aa6 // domain("basin")
+    DomBasinRegional     uint64 = 0x203b69310f71797c // domain("basin-regional")
+    DomBasinLocal        uint64 = 0x2c97a5cf22fbc844 // domain("basin-local")
+    DomVolcanic          uint64 = 0x32086c8b90c635b8 // domain("volcanic")
+    DomWarpX             uint64 = 0xa1e186323c6662fa // domain("warp-x")
+    DomWarpY             uint64 = 0xa1e187323c6664ad // domain("warp-y")
+    DomDetailWarpX       uint64 = 0xcbea8698f30a6740 // domain("detail-warp-x")
+    DomDetailWarpY       uint64 = 0xcbea8798f30a68f3 // domain("detail-warp-y")
+    DomFieldOffset       uint64 = 0xb8f53a94de4a5069 // domain("field-offset")
 )
 ```
+
+`DomWarpX` and `DomWarpY` differ in one nibble, and `DomDetailWarpX` and
+`DomDetailWarpY` likewise, because FNV-1a over two names differing in the last
+byte differs only in what that byte contributed to the final multiply. That is
+harmless here and worth knowing anyway: the identifier is an input to the mixer
+of section 8.2, never a value in its own right, and the mixer's job is to
+separate inputs this close. A change that ever uses a domain identifier
+*without* mixing it has to revisit this.
 
 The alternative — package-level `var`s computed in `init` — is shorter and worse: a `var` can be assigned, the values never appear in a diff, and a renamed domain silently changes every world with nothing in the commit to see. Constants plus a test make both halves visible, and the test is four lines.
 
@@ -2940,6 +2965,16 @@ Do not compute min/max elevation or histogram thresholds from the currently expl
 - Assuming a `Component` may hold any value it can represent. The extreme
   negative value — `math.MinInt16`, `math.MinInt32` — is not a coordinate, and
   `abs` and negation are wrong for it (section 4.1).
+- Writing a test or a reference value as a **constant expression** when the
+  behavior under test is wrapping or overflow. Go evaluates constant
+  expressions in arbitrary precision and rejects a conversion or an assignment
+  that does not fit, so a constant `Component(WorldRadius+1)` is a build error
+  and a constant FNV-1a step is an "overflows uint64" error — neither is the
+  wrapped value the runtime would produce. Route such a check through a
+  variable. This is the mirror of the trap above it: runtime integer
+  arithmetic wraps silently and compile-time integer arithmetic does not wrap
+  at all, and the two hazards look nothing alike from the source
+  (sections 4, 8.1, appendix D).
 
 ---
 
@@ -3299,3 +3334,240 @@ If `bbolt` is ever adopted, the required changes are bounded and known:
   byte order matches numeric order and range scans work.
 - Pin the version exactly and treat a major upgrade as a format migration.
 - Sections 30.11 and 27.3 survive unchanged in substance.
+
+---
+
+## Appendix D — Implementation Notes
+
+This appendix records what the implementation had to decide that the body of
+this document does not pin, and carries the arithmetic that shows a stated bound
+actually holds. It exists because three kinds of thing kept ending up in commit
+messages, where nobody reads them twice: a formula the body describes but does
+not write out, a constant chosen with a reason, and a measurement that settles an
+argument.
+
+It is not a changelog and not a second specification. **Where it disagrees with
+the body, the body wins**, and a number here may be changed by a later
+implementation without touching the body unless the body names it. What it must
+never do is state something the code does not do; each entry names the phase that
+landed it, so an entry describing code that has since moved is a defect in this
+appendix rather than a decision to honor.
+
+### D.1 The lattice solve, written out
+
+Section 7.1 says stage 3 inverts the two-vector basis and must be exact. This is
+that inverse, since it is easy to derive with a sign error and hard to notice
+one — a wrong solve still lands somewhere, and stage 2 still finishes to
+*a* canonical coordinate, just not the right one.
+
+Mirror centers `0` and `1` are the basis. In axial form:
+
+```text
+v0 = ( M, -N )        M = 2N+1
+v1 = ( N+1, -M )
+```
+
+Writing `(q, r) = a*v0 + b*v1` and solving:
+
+```text
+determinant  = M*(-M) - (N+1)*(-N)  =  -(3N^2 + 3N + 1)  =  -D
+
+a =  ( M*q + (N+1)*r ) / D
+b = -( N*q +     M*r ) / D
+```
+
+`D` is the index of the lattice and is also `1 + 3N(N+1)`, the tile count of the
+canonical hexagon in section 7.2 — the same number by two derivations, which is
+the arithmetic statement that the hexagon is an exact fundamental domain with no
+tie to break. Checking that identity in a test is worth more than it looks: it
+fails on an off-by-one in either the basis or the domain.
+
+Round `a` and `b` to the nearest integer, then compute the residual:
+
+```text
+residual_q = q - a*M - b*(N+1)
+residual_r = r + a*N + b*M
+```
+
+**The residual has to be computed at 128 bits as well, not just the quotients.**
+`a*M` and `b*(N+1)` are each about the size of `q` and very nearly cancel, so an
+`int64` reconstruction overflows on exactly the inputs the solve exists for.
+
+These are the bounds that make the solve safe. `DivRoundPos` panics if either of
+the middle two is violated and the residual bound has a test of its own, so the
+tests drive them with inputs at both ends of `int64` rather than taking them on
+faith:
+
+| | alpha, `N = 32,767` | shipping, `N = 2,147,483,647` |
+|---|---:|---:|
+| `D` | `3,221,127,169` | `13,835,058,048,839,712,769` |
+| `D` against `MaxUint64` | negligible | 75% of it |
+| Numerator high word, at most `(3N+2)/2` | `49,151` | `3,221,225,471` |
+| `\|a\|`, `\|b\|`, at most about `2^63/N` | `2.8e14` | `4.3e9` |
+| Residual hex norm, at most `2N+1` | `65,535` | `4,294,967,295` |
+
+Two of those rows are the whole reason the solve is written this way. `D` does
+not fit in an `int64` at the shipping width but does fit in a `uint64` with a
+quarter of the range to spare, which is what makes a 128-by-64 division the right
+shape rather than full 128-bit arithmetic. And the numerator's high word stays
+far below `D` at either width, which is the precondition `math/bits.Div64`
+panics on — so the cold branch cannot become a panic in the field.
+
+The residual bound falls out of the rounding: `a` and `b` are each within `0.5`
+of the exact real solution, so the residual is at most
+`0.5*|v0| + 0.5*|v1| = 2N+1` in hex norm, which is what section 7.1 promises
+stage 2.
+
+**Ties round away from zero.** Any consistent rounding leaves a residual stage 2
+can finish, so this is free to choose — but it should be *sign-symmetric*, so
+that the solve commutes with negation and the six-fold symmetry of the domain
+survives it. Rounding half away from zero and rounding half to even both qualify;
+rounding half toward positive infinity does not. The first is what `math/bits`
+makes cheapest.
+
+*Phase 1.*
+
+### D.2 What stage 2 costs, and where it gives up
+
+Section 7.1 says stage 2 lands "within a handful of steps" and is bounded by a
+fixed iteration count. The implementation uses **32**, and these are the measured
+worst cases over 200,000 samples of each shape:
+
+| Input | Greedy steps to canonical |
+|---|---:|
+| A neighbor step off a canonical coordinate | 1 |
+| The residual left by the stage-3 solve | 1 |
+| A sum of up to eight mirror centers | 8 |
+| A coordinate at the `2^61` safe bound | does not converge within 1,000 |
+
+The first three say the limit has an order of magnitude of headroom for anything
+the program produces. The fourth says what the limit is actually *for*: greedy is
+useless that far out — it removes one mirror center per step and there are on the
+order of `10^14` to remove — so the limit is not a safety margin against a
+runaway loop but the handoff to stage 3, and it is reached on purpose.
+
+An input inside the `2^61` bound but too far out for 32 steps therefore takes
+**both** stages: stage 2 is attempted, spends its budget, and stage 3 finishes.
+That path is worth a test of its own, because it is the only one where stage 2
+runs and does not decide the answer.
+
+*Phase 1.*
+
+### D.3 `internal/mathx.Int128`
+
+The exact 128-bit helper section 7.1 asks for is a value type of an `int64` high
+word and a `uint64` low word, with `MulInt64`, `Int128Of`, `Add`, `Sub`, `Neg`,
+`Int64`, and `DivRoundPos`. It is built on `math/bits`; `math/big` would also be
+correct in this branch and is not used, because a value type keeps the solve
+allocation-free without the branch stopping being cold.
+
+Two details are easy to get wrong and are worth naming:
+
+- **The signed product from the unsigned one.** `bits.Mul64` computes the
+  unsigned product, and converting it to the signed product is two corrections —
+  subtract `b` from the high word if `a` is negative, and `a` if `b` is negative
+  — each of which removes the `2^64` an unsigned reading of a negative operand
+  implicitly added.
+- **The tie comparison must not double the remainder.** `2*rem >= d` overflows a
+  `uint64` when `d` is above `2^63`, which it is at the shipping width. Compare
+  `rem >= d - rem` instead; `rem < d` is guaranteed, so the subtraction cannot
+  underflow.
+
+`DivRoundPos` panics on a zero divisor and on a quotient that does not fit, both
+of which are invariants of the solve rather than conditions a caller answers. The
+tests drive it against `math/big` with operands at both ends of `int64`, because
+nothing the program produces reaches this code and a reference implementation is
+the only thing that can check it.
+
+*Phase 1.*
+
+### D.4 The mixer
+
+Section 8.2 asks for a well-understood finalizer written out in the package. It
+is SplitMix64's, applied once per input:
+
+```text
+h = mix( seed + 0x9e3779b97f4a7c15 )
+h = mix( h ^ domain )
+h = mix( h ^ a )
+h = mix( h ^ b )        // and once more for the third coordinate in Hash3
+```
+
+The golden-ratio increment on the seed is there so that seed zero is not a fixed
+point of the finalizer. Feeding the coordinates one at a time rather than
+combining them first is what makes `Hash2` and `Hash3` differ for the same
+leading arguments: the chain length differs, so `Hash3(s, d, a, b, 0)` and
+`Hash2(s, d, a, b)` are unrelated, and a call that passed the wrong arity would
+have to be wrong loudly rather than quietly.
+
+Measured: flipping any one bit of a coordinate flips `0.500` of the output bits
+over 20,000 seeds and all 64 bit positions. That test is coarse, and it is the
+kind of thing that is worth having anyway — a mixer that failed it would show up
+as visible structure in a field, discovered by looking at a picture and chased
+back through three layers.
+
+*Phase 1.*
+
+### D.5 Constants that are derived rather than written down
+
+Three values could have been literals and are not, each for a reason the body
+already gives somewhere else:
+
+- **`ComponentWidthBits`** is `bits.Len64(WorldRadius) + 1`, not `16`. Section
+  4.2 says the width appears in exactly two places and a literal `32767`
+  elsewhere is a defect; a third constant spelling the same decision in a
+  different unit is the same defect wearing a different name. A two's complement
+  type of `w` bits holds a maximum of `2^(w-1) - 1`, whose bit length is `w-1`.
+  It is a function rather than a constant because Go cannot call one in a
+  constant expression.
+- **`NyquistWavelengthMiles`** is `4 * ApothemMiles`, not `12`. Section 9.3 says
+  the limit is derived from the apothem, and a literal would survive a change to
+  the hex scale.
+- **The world-space `y` scale** is `3 * sqrt(3)` computed once at
+  initialization, which is two roundings — `math.Sqrt(3)` correctly rounded, then
+  multiplied. It is not the correctly rounded value of `3*sqrt(3)`, and it does
+  not need to be: it needs to be the *same* value everywhere, which IEEE-754
+  guarantees for both steps. Writing it as a decimal literal would be a third
+  value again, and one that no longer follows the apothem.
+
+*Phase 1.*
+
+### D.6 Validation the body does not dictate
+
+Section 21 says validation must reject what cannot be evaluated safely and names
+the categories. These are the specific bounds chosen, which are the implementation's
+to change:
+
+| Rule | Sentinel | Why |
+|---|---|---|
+| `SeaLevel` in `[0, 1]` | `ErrOutOfRange` | it is a normalized threshold |
+| Base wavelengths at or above Nyquist | `ErrBelowNyquist` | a base below the limit is the same defect as a ladder reaching below it, one step earlier |
+| `WarpStrengthMiles >= 0` | `ErrNotPositive` | zero disables the warp and is a legitimate setting, not a missing one |
+| Cell sizes positive and at most `WorldRadius` | `ErrNotPositive`, `ErrOutOfRange` | a level larger than the map addresses one cell |
+| Chunk `<` region `<` macro region, strictly | `ErrNotAscending` | a level equal to the one below it is a level that does nothing |
+| `ClosedHexes + FalloffHexes <= WorldRadius` | `ErrOutOfRange` | forced terrain reaching the origin leaves no world to generate |
+
+The strict ascent is the one worth arguing with. A degenerate hierarchy is
+evaluable, so refusing it is a judgment rather than a necessity; it is refused
+because a configuration that quietly collapses two levels of section 11 into one
+is more likely to be a typo than an intention, and the refusal names the field.
+
+`ClosedHexes = 0` with `FalloffHexes = 0` stays valid, with a test that says why:
+section 15.1 needs it, and so do the wrap tests that use it to see the seam.
+
+*Phase 1.*
+
+### D.7 Sentinels that exist before the code that raises them
+
+Section 19.1 lists eight error values as one block, and phase 1 can reach four of
+them. All eight are declared, each with the phase that raises it named in its
+doc comment, so `ErrOctaveCount`, `ErrPassCount`, `ErrFieldShape`, and the fbm
+half of `ErrBelowNyquist` are waiting rather than missing.
+
+The alternative — declare each sentinel with the validation that first returns it
+— was rejected because it makes the phase that adds a field also add error
+plumbing, so the diff that should be about one new bound is about four things.
+The cost is that an exported name exists which nothing returns yet, which is
+visible and harmless; the cost of the alternative is invisible.
+
+*Phase 1.*
