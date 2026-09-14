@@ -410,6 +410,9 @@ func TestRenderIsDeterministic(t *testing.T) {
 // free to fuse and amd64 is not — so if a hit test ever lands on the other side
 // of a hex boundary because of it, this is the test that says so.
 func TestRenderGolden(t *testing.T) {
+	// Not the seed the tuning tool opens on, for the reason wgva.goldenSeed
+	// gives: re-recording a golden table to tidy a constant spends the one
+	// signal a golden table carries.
 	g := wgva.NewDefault(0x5747564100000001)
 	v := mustViewport(t, wgva.NewCoord(101, -57), 9, 7, 0, 1)
 	l, _ := render.LayerNamed(render.DefaultLayer)

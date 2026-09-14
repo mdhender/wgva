@@ -17,7 +17,7 @@ import (
 	"github.com/mdhender/wgva/view"
 )
 
-const testSeed = wgva.Seed(0x5747564100000001)
+const testSeed = wgva.Seed(0x0123456789abcdef)
 
 func newTestServer(t *testing.T) (*server, *httptest.Server) {
 	t.Helper()

@@ -255,7 +255,7 @@ func (v View) With(param, value string) (View, error) {
 //
 // A seed is the one number in this grammar that people copy between a browser,
 // a terminal, and a commit message, so both spellings are accepted and the hex
-// one is what the tool prints: a world identified as 0x5747564100000001 is
+// one is what the tool prints: a world identified as 0x0123456789abcdef is
 // recognizable at a glance in a way that its decimal expansion is not.
 func ParseSeed(text string) (wgva.Seed, error) {
 	text = strings.TrimSpace(text)

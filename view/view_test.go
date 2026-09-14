@@ -222,7 +222,7 @@ func TestZoomedStaysInRange(t *testing.T) {
 // TestSeedRoundTrip covers the one number people copy between a browser, a
 // terminal, and a commit message.
 func TestSeedRoundTrip(t *testing.T) {
-	for _, s := range []wgva.Seed{0, 1, 42, 0x5747564100000001, ^wgva.Seed(0)} {
+	for _, s := range []wgva.Seed{0, 1, 42, 0x0123456789abcdef, ^wgva.Seed(0)} {
 		text := view.FormatSeed(s)
 		back, err := view.ParseSeed(text)
 		if err != nil {

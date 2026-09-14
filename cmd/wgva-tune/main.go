@@ -18,7 +18,7 @@
 // configuration that produced it and reproduced elsewhere. The web interface is
 // only how somebody drives it.
 //
-//	wgva-tune --seed 0x5747564100000001
+//	wgva-tune --seed 0x0123456789abcdef
 //
 // See DESIGN.md 29.1.
 package main
@@ -50,7 +50,7 @@ func main() {
 		// coffee-shop network. The flag exists; the default is the decision.
 		host = flag.String("host", "127.0.0.1", "address to bind (the default is loopback, and should stay that way)")
 		port = flag.Int("port", 8180, "port to bind")
-		seed = flag.String("seed", "0x5747564100000001", "world seed, in decimal or with an 0x prefix")
+		seed = flag.String("seed", "0x0123456789abcdef", "world seed, in decimal or with an 0x prefix")
 		// The budget is counted in generator evaluations rather than tiles,
 		// because a tile count cannot tell a cheap window from one seven times
 		// longer. Raising it is a thing this tool is for: measuring how long a

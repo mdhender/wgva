@@ -31,6 +31,13 @@ import (
 // review.
 //
 // Recorded under AlgorithmVersion 2 at world radius 32767.
+//
+// This is deliberately not the seed the terrain tuning tool opens on. Two
+// reasons, and the second is the one that matters. A golden table's whole signal
+// is that a recorded value moved, so re-recording it to tidy up a constant
+// spends that signal on nothing — every row would move at once with nothing else
+// in the diff. And a seed nobody looks at every day is better coverage than one
+// that is exercised by hand a hundred times an afternoon.
 const goldenSeed Seed = 0x5747564100000001
 
 // goldenCoords are the coordinates the table covers. The selection is
