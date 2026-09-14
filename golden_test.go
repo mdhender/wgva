@@ -145,3 +145,93 @@ func TestGoldenCoordinatesAreCanonical(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The region influence
+// ---------------------------------------------------------------------------
+
+// The second golden table: the blended region influence of DESIGN.md 11.2 at
+// the same coordinates, under the same seed and the same defaults.
+//
+// It is a separate table rather than more columns on the first because the two
+// answer different questions and a golden table's whole signal is that a value
+// moved. Re-recording the scale rows to widen them would spend that signal on
+// nothing — every row would change at once with nothing else in the diff to
+// explain it.
+//
+// It earns its keep twice over. The blend is ten multiply-adds a tile and every
+// one of them is a place DESIGN.md 25.1 can be forgotten; a missing mathx.Mul
+// fuses on arm64 and not on amd64, and nothing else in the module would notice.
+// And the half-angle recovery of an orientation is arithmetic whose only check
+// is that it still produces the number it produced yesterday.
+//
+// Recorded under AlgorithmVersion 2 at world radius 32767.
+
+// regionScalarCount is how many normalized biases RegionParams carries, and
+// TestRegionParamsShape is what keeps it true.
+const regionScalarCount = 7
+
+// goldenRegionRow is one coordinate, the float64 bits of every blended bias in
+// declaration order, and the bits of the blended ridge orientation.
+type goldenRegionRow struct {
+	q, r    int64
+	scalars [regionScalarCount]uint64
+	ridge   [2]uint64
+}
+
+// goldenRegionValues is one row per coordinate in goldenCoords, in that order.
+var goldenRegionValues = []goldenRegionRow{
+	{0, 0, [regionScalarCount]uint64{0xbfddd33abe9beeb0, 0xbfeefeda87bbd340, 0x3fe6a12f1769ecc2, 0xbfdd759da5b30948, 0x3fe7b516f9e2729a, 0x3fc253a8960d4608, 0xbfea66dfcb7dd3de}, [2]uint64{0x3fead2a60a4f6c24, 0xbfe1737017e72b3f}},
+	{1, 0, [regionScalarCount]uint64{0xbfddd2756f6412ce, 0xbfeefeacb7116122, 0x3fe6a0a9a5b5e3e9, 0xbfdd74aed7f889f9, 0x3fe7b4bb9c679950, 0x3fc25520d0c5c9ed, 0xbfea662e4ab21bf1}, [2]uint64{0x3fead289f844e032, 0xbfe1739b3cde3797}},
+	{0, 1, [regionScalarCount]uint64{0xbfddd3b7fc0ddb01, 0xbfeefe9e9ccecb3c, 0x3fe6a0e01e0b4ce5, 0xbfdd748159e80101, 0x3fe7b43da4ca8d22, 0x3fc254e7932a0baf, 0xbfea661bd86a7ce1}, [2]uint64{0x3fead2b01cbc3ddd, 0xbfe173609cb646ce}},
+	{-1, 0, [regionScalarCount]uint64{0xbfddd23525c9f234, 0xbfeefe5b82af5e7f, 0x3fe6a0dd09111bbf, 0xbfdd74af01b63a29, 0x3fe7b52b41ef5631, 0x3fc2554f0ae9c5c1, 0xbfea668ea2f6a230}, [2]uint64{0x3fead28425ba1eb4, 0xbfe173a42fc2cd16}},
+	{0, -1, [regionScalarCount]uint64{0xbfddd2c1176e3f5a, 0xbfeefe7c33e4c1c3, 0x3fe6a0e9659d9623, 0xbfdd74aec9edae84, 0x3fe7b46a964afdb6, 0x3fc2515f4959b528, 0xbfea66c9b1e054b1}, [2]uint64{0x3fead2b7d13becc0, 0xbfe17354c4d0593a}},
+	{1, -1, [regionScalarCount]uint64{0xbfddd29ed2fb5977, 0xbfeefdeb61045dea, 0x3fe6a0f6c0057df8, 0xbfdd751d20ea7a8e, 0x3fe7b466a3a41cf3, 0x3fc25502d786e249, 0xbfea666144794fd0}, [2]uint64{0x3fead2a03a950f3e, 0xbfe173790697fab1}},
+	{-1, 1, [regionScalarCount]uint64{0xbfddd32e41620d65, 0xbfeefde4b326d388, 0x3fe6a14595193423, 0xbfdd747d8af4cdc6, 0x3fe7b4c074088932, 0x3fc253bebed4aec4, 0xbfea668a0aedf31c}, [2]uint64{0x3fead2830e5c0f7b, 0xbfe173a5dd21f6fe}},
+	{7, 11, [regionScalarCount]uint64{0xbfddef666b14a51e, 0xbfeece188a5fb55a, 0x3fe64e894711ba1d, 0xbfdc88e18a787e6d, 0x3fe7170faf1571b9, 0x3fc3788757d89c4a, 0xbfe9c07536987b41}, [2]uint64{0x3fead1d6c2ca6afd, 0xbfe174aea0b3fc9d}},
+	{-7, 11, [regionScalarCount]uint64{0xbfddd99b0faca9b5, 0xbfeec347a7e1d5cf, 0x3fe6a071a89c8b13, 0xbfdd201b45012102, 0x3fe791bcf04e13a7, 0x3fc270037795d1cc, 0xbfea454345880a56}, [2]uint64{0x3feacb810d2e2ecb, 0xbfe17e666c8dba7f}},
+	{7, -11, [regionScalarCount]uint64{0xbfdda7501f172b0a, 0xbfeec241ce6af936, 0x3fe68f6db3880565, 0xbfdd47426a4a65ad, 0x3fe780df1db47a0d, 0x3fc2767b85e4d36b, 0xbfea48da3eb20b63}, [2]uint64{0x3fead2a5a89ee28e, 0xbfe17370ae0e60a5}},
+	{-7, -11, [regionScalarCount]uint64{0xbfdd45d14157599c, 0xbfeea4485a77e596, 0x3fe6613b7de480c0, 0xbfdca52795238584, 0x3fe74f144e81911e, 0x3fc15248400dc580, 0xbfea44b8a535ca73}, [2]uint64{0x3fead52d1acf6a5b, 0xbfe16f8ce929c92e}},
+	{1000, 0, [regionScalarCount]uint64{0xbfcdae537e9c40e9, 0xbfe86c81ee580b33, 0xbfbb01c2e97cf7a9, 0x3fe53e8a93023e67, 0xbfa16e4fe2cf7d4e, 0x3fe0d9f0deb17d3f, 0xbfd53afdf52dcd91}, [2]uint64{0x3fefdcb944b42a2d, 0x3fb7bb611c06738c}},
+	{0, 1000, [regionScalarCount]uint64{0x3fd6292ff578e3a0, 0x3fd17cc226233d79, 0xbfec71d9bf4b8ca8, 0x3f34eccad2722100, 0x3fe84c8d52e45339, 0x3fd0b094212162cc, 0xbfec4385dc53e61d}, [2]uint64{0x3fc7de52d6c108a8, 0x3fef70506be90d16}},
+	{-1000, -1000, [regionScalarCount]uint64{0x3fd72415d1476401, 0xbfd919ba7e853bb5, 0x3fe8030d37517fd3, 0xbfe5e5f827ceab80, 0xbfb9eb6edd848f8f, 0xbfd5299e5ccdcff2, 0x3fea623ff84e8e68}, [2]uint64{0x3fe23ccb5ea3d68c, 0x3fea4b5c7358ef2c}},
+	{12345, -6789, [regionScalarCount]uint64{0xbfe49234679cdbfe, 0xbfd470ebaec24214, 0x3fe03ad9aa4e47cf, 0xbfa2a2f0b3feb829, 0xbfe29789e1170152, 0xbfd95dcb81f3016c, 0xbfc825beab5b82af}, [2]uint64{0x3fe684d812b978d3, 0xbfe6bc42cc07cc0f}},
+	{32767, 0, [regionScalarCount]uint64{0xbfe50e3bd748637d, 0x3fe230a91e2295a1, 0x3fe70e32ecdafeaf, 0xbfdd0622e7313f08, 0x3fdaf6e5be729be2, 0x3fe08159ee996d8b, 0xbfe142f68eab449e}, [2]uint64{0x3fe66fe3994ffd52, 0xbfe6d0f12187cbcd}},
+	{0, 32767, [regionScalarCount]uint64{0xbfebb3739a306602, 0xbfecce2c3a4b4d24, 0x3fe776ca4b32c95b, 0xbfd7083d8543c06f, 0xbfc1ccd049649876, 0x3fe5718300d868a1, 0xbfc0dcce5a0c9bc4}, [2]uint64{0x3fe8bf9781600eef, 0xbfe4492e9e10e11a}},
+	{-32767, 0, [regionScalarCount]uint64{0x3fa3ec3b391b6a96, 0x3fd44ffd1cbc7cc9, 0x3fe13423d6696d5f, 0x3fe1af94c09f5756, 0xbfe72ac30209b741, 0xbfe9555a53db1436, 0x3fd5d270dcbbc6e5}, [2]uint64{0x3fc33fd99a81330b, 0x3fefa2d5d2e0850c}},
+	{0, -32767, [regionScalarCount]uint64{0xbfd063a8aaed4717, 0xbfd11ccbcfac026f, 0xbfbf1db3a6b2fa1b, 0xbfe0e9b2e7727c2a, 0x3fe1ce85a9aa1191, 0x3fcaad5bf03aa0ee, 0xbfe9f2259546499a}, [2]uint64{0x3fefee574182f6cf, 0x3fb0ccd0a3fb253c}},
+	{32767, -32767, [regionScalarCount]uint64{0x3fe9e3290a621ceb, 0x3fecbbd47c75cd41, 0xbfe368f4dfeee04c, 0xbfe4c4d3986d31e6, 0x3fdb8efc0e40f7c7, 0x3fe625015419c14f, 0x3fea825d00742ca3}, [2]uint64{0x3fe2f98ce708755b, 0x3fe9c4718f79a05b}},
+	{-32767, 32767, [regionScalarCount]uint64{0x3fc5d919e505f9d8, 0x3f8dc9fb9bf4f01c, 0xbfe5454479ecaf89, 0xbfee2508afa2322a, 0x3fd91132462562bf, 0xbfe3365e5d4bb50a, 0x3fd9a282f1586f59}, [2]uint64{0x3fe484144abd6c40, 0xbfe88eda815e63a2}},
+	{16384, -32767, [regionScalarCount]uint64{0x3fc13b0590131702, 0xbfe68d98ca7973d2, 0xbfd3c16242e9632f, 0x3fe5a61c874d4049, 0x3fdc5dced85e68e2, 0x3fe2aa759a1ddb17, 0xbfd92495699b2510}, [2]uint64{0x3fe023d12b8e2f5e, 0xbfeba1ae2225fa87}},
+	{65535, -32767, [regionScalarCount]uint64{0xbfddd33abe9beeb0, 0xbfeefeda87bbd340, 0x3fe6a12f1769ecc2, 0xbfdd759da5b30948, 0x3fe7b516f9e2729a, 0x3fc253a8960d4608, 0xbfea66dfcb7dd3de}, [2]uint64{0x3fead2a60a4f6c24, 0xbfe1737017e72b3f}},
+	{32768, 0, [regionScalarCount]uint64{0x3fc5d919e505f9d8, 0x3f8dc9fb9bf4f01c, 0xbfe5454479ecaf89, 0xbfee2508afa2322a, 0x3fd91132462562bf, 0xbfe3365e5d4bb50a, 0x3fd9a282f1586f59}, [2]uint64{0x3fe484144abd6c40, 0xbfe88eda815e63a2}},
+}
+
+func TestGoldenRegion(t *testing.T) {
+	if len(goldenRegionValues) != len(goldenCoords) {
+		t.Fatalf("the region table has %d rows for %d coordinates", len(goldenRegionValues), len(goldenCoords))
+	}
+
+	g := NewDefault(goldenSeed)
+	for i, row := range goldenRegionValues {
+		if [2]int64{row.q, row.r} != goldenCoords[i] {
+			t.Fatalf("row %d is for (%d, %d), want (%d, %d)", i, row.q, row.r, goldenCoords[i][0], goldenCoords[i][1])
+		}
+		c := NewCoord(row.q, row.r)
+		p := g.RegionInfluence(c)
+
+		for j, got := range regionScalars(p) {
+			if want := row.scalars[j]; math.Float64bits(got) != want {
+				t.Errorf("%s at (%d, %d) = %#016x (%v), want %#016x (%v)",
+					regionScalarNames[j], row.q, row.r, math.Float64bits(got), got,
+					want, math.Float64frombits(want))
+			}
+		}
+		if got := math.Float64bits(p.Ridge.X); got != row.ridge[0] {
+			t.Errorf("Ridge.X at (%d, %d) = %#016x, want %#016x", row.q, row.r, got, row.ridge[0])
+		}
+		if got := math.Float64bits(p.Ridge.Y); got != row.ridge[1] {
+			t.Errorf("Ridge.Y at (%d, %d) = %#016x, want %#016x", row.q, row.r, got, row.ridge[1])
+		}
+	}
+}

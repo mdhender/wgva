@@ -73,12 +73,15 @@ var ErrUnknownLayer = errors.New("unknown layer")
 
 // AllLayers returns every layer, in a fixed order.
 //
-// DESIGN.md 29 lists seventeen. Four of them are here, and they are the four
-// that exist: the raw noise scales of DESIGN.md 10, which exist to separate "the
-// noise is wrong" from "the composition is wrong" when a window looks off.
-// Elevation, climate, terrain, relief, the region influence, the basins, and the
-// rim arrive with the phases that compute them — a layer that named a field
-// nothing generates yet would be a control that draws an error.
+// DESIGN.md 29 lists seventeen. Six of them are here, and they are the six that
+// exist: the raw noise scales of DESIGN.md 10, which separate "the noise is
+// wrong" from "the composition is wrong" when a window looks off, and the two
+// that draw the blended region influence of DESIGN.md 11.2 — which is what the
+// anchor lattice has to be looked for in, because a lattice nothing draws is a
+// lattice nobody sees until it is under a coastline. Elevation, climate,
+// terrain, relief, the ridge term, the basins, and the rim arrive with the
+// phases that compute them; a layer that named a field nothing generates yet
+// would be a control that draws an error.
 func AllLayers() []Layer { return slices.Clone(layers) }
 
 // LayerNamed returns the layer with that name.
@@ -123,5 +126,27 @@ func buildLayers() []Layer {
 			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.ScaleAt(s, c) },
 		})
 	}
-	return out
+
+	// The two region layers. Both draw one blended anchor parameter, and both
+	// are here for the same reason: the anchor lattice is invisible in a
+	// composed field and obvious in the parameter it biases, so this is where a
+	// row of lozenges or a Voronoi plateau shows up while it can still be
+	// fixed. Look for them in the grid tab at a scale where a region is a few
+	// pixels across. See DESIGN.md 11.2.
+	return append(out,
+		Layer{
+			Name:   "region-influence",
+			Doc:    "the blended regional elevation bias: what regional uplift is made of",
+			Cost:   1,
+			key:    signedKey,
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.RegionInfluence(c).ElevationBias },
+		},
+		Layer{
+			Name:   "roughness",
+			Doc:    "the blended regional roughness bias: where relief is exaggerated and where it is subdued",
+			Cost:   1,
+			key:    signedKey,
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.RegionInfluence(c).Roughness },
+		},
+	)
 }

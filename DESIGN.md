@@ -3744,3 +3744,64 @@ The cost is that an exported name exists which nothing returns yet, which is
 visible and harmless; the cost of the alternative is invisible.
 
 *Phase 1.*
+
+### D.8 The region blend, written out
+
+Section 11.2 says to interpolate across the containing triangle and to square
+the barycentric weights. It does not say which of the cell's two diagonals
+splits it, and picking the wrong one reintroduces the artifact the section
+exists to avoid — it is bilinear's long diagonal by another name.
+
+Anchors sit at `(i*size, j*size)`, so a cell's corners are at axial
+`(0,0)`, `(1,0)`, `(0,1)` and `(1,1)` times `size`. Through section 7's
+embedding, and writing `s` for `size`, those are
+
+```text
+(0, 0)   (6s, 0)   (3s, 3s*sqrt(3))   (9s, 3s*sqrt(3))   miles
+```
+
+so the diagonal from `(1,0)` to `(0,1)` is `6s` miles long and the one from
+`(0,0)` to `(1,1)` is `6s*sqrt(3)`. **The short diagonal is `fu + fv = 1`**, and
+it is the one that splits the rhombus into two equilateral triangles. Below it
+the anchors are `(i,j)`, `(i+1,j)`, `(i,j+1)` with weights
+`1-fu-fv`, `fu`, `fv`; above it they are `(i+1,j+1)`, `(i+1,j)`, `(i,j+1)` with
+weights `fu+fv-1`, `1-fv`, `1-fu`. Square each, divide by the sum of the three
+squares — which is at least a third for three non-negative weights summing to
+one, so there is no zero to guard against — and blend.
+
+`fu` and `fv` are `FloorMod(q, size) / size`, a ratio of integers, so the two
+sides of a cell boundary agree exactly rather than to within a rounding.
+
+**The join was measured, because section 11.2's claim about it is the whole
+reason for the squaring.** Walking a line of 8,000 hexes at the default region
+size of 128 and bucketing the second difference of each blended bias by what the
+step crossed:
+
+| crossing | largest second difference |
+|---|---:|
+| a cell boundary | 0.00047 |
+| the short diagonal inside a cell | 0.0073 |
+| neither — the interior of a triangle | 0.0067 |
+
+The cell boundary is an order of magnitude *flatter* than the field's own
+curvature, because squaring the weights makes the blend flat at every anchor and
+a cell boundary runs through two of them. The short diagonal measures level with
+the interior. Neither join is distinguishable from the surface it joins, which
+is what "a join rather than a crease" has to mean for a field that relief will
+take a first difference of. `TestRegionBoundaryHasNoCrease` is this table as an
+assertion.
+
+Two smaller decisions the body leaves open:
+
+- **A parameter index, not a domain per parameter.** The seven biases are hashed
+  as `Hash3(seed, DomRegionStyle, param, i, j)`. The one-domain-per-node rule of
+  section 8.1 is about noise lattices — two field nodes sharing a domain share a
+  gradient table and a sampling offset — and an anchor parameter is neither. It
+  is the shape the seed-derived sampling offset already uses.
+- **The orientation fallback is the containing triangle's apex anchor.** Where
+  the doubled-angle blend cancels there is no orientation to recover, so the
+  requirement is only that the answer be deterministic and local. The threshold
+  is a squared length of `1e-12`, below which `dx/|d|` is rounding rather than an
+  angle.
+
+*Phase 3.*

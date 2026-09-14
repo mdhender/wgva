@@ -109,6 +109,16 @@ type Sample struct {
 	Local           float64
 	Detail          float64
 
+	// Region is the blended region influence at the coordinate: every anchor
+	// parameter of DESIGN.md 12, carried so that a tuning layer can be drawn
+	// and so that a coordinate's regional character can be read rather than
+	// inferred from a picture.
+	//
+	// It is the whole blend rather than the two entries DESIGN.md 4.3 names.
+	// Regional uplift and the roughness the ridge term is scaled by are what
+	// elevation makes of two of these biases, and neither exists until it does.
+	Region RegionParams
+
 	// RimDistance is hexes from the outer edge of the map. See DESIGN.md 15.1.
 	RimDistance int64
 }
@@ -125,6 +135,7 @@ func (g *Generator) Sample(c Coord) Sample {
 		Regional:        g.ScaleAt(ScaleRegional, c),
 		Local:           g.ScaleAt(ScaleLocal, c),
 		Detail:          g.ScaleAt(ScaleDetail, c),
+		Region:          g.RegionInfluence(c),
 		RimDistance:     c.RimDistance(),
 	}
 }
