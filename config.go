@@ -137,6 +137,21 @@ type Config struct {
 	// the two band ladders fall.
 	Climate ClimateConfig
 
+	// Basin is the enclosed low ground of DESIGN.md 17: three scales of it,
+	// what the region's basin bias is worth against them, and what the whole
+	// blend is worth as a multiplier on moisture.
+	//
+	// It is its own group rather than part of Terrain because of where it does
+	// *not* appear. Basin influence never enters elevation, and a reader who
+	// found these keys under the elevation composite would reasonably conclude
+	// the opposite; see DESIGN.md 17.1.
+	Basin BasinConfig
+
+	// Terrain is what the classifier of DESIGN.md 17 reads: the volcanic
+	// tendency field and its two thresholds, and the elevation, relief, heat,
+	// and wetness thresholds each ordered rule is cut at.
+	Terrain TerrainConfig
+
 	// The three levels of the addressing hierarchy, in hexes along either axial
 	// basis direction. They are addressing devices and must never be visible in
 	// the output.
@@ -281,6 +296,130 @@ type ClimateConfig struct {
 	MoistureBands MoistureBands
 }
 
+// BasinConfig is what the basin composite of DESIGN.md 17 weighs.
+//
+// The four weights are relative and are normalized by their own total, so
+// scaling all four changes nothing and only their ratios are a decision. What
+// is not one of them is MoistureWeight, which is an amount rather than a
+// weight: it is how strongly the blended basin multiplies the moisture terrain
+// reads, and it is the one dial that decides whether basins are geography or
+// scenery.
+type BasinConfig struct {
+	// The three scales of enclosed low ground, coarse to fine. Broad is the
+	// span of a continental interior that drains nowhere, Regional is a single
+	// basin, and Local is the floor of one.
+	//
+	// Each has its own hashing domain, so no two of them share a lattice. Three
+	// nodes under one domain would share a gradient table and a sampling
+	// offset, so at the world origin all three would return the same value and
+	// the composite would be one field counted three times.
+	Broad    LadderConfig
+	Regional LadderConfig
+	Local    LadderConfig
+
+	// What each scale and the region's basin bias are worth against each other.
+	BroadWeight    float64
+	RegionalWeight float64
+	LocalWeight    float64
+	BiasWeight     float64
+
+	// MoistureWeight is how far a basin may move the moisture terrain is
+	// classified from: wetness is moisture + MoistureWeight*basin*moisture.
+	//
+	// It multiplies rather than adds, which is what makes a basin deepen
+	// whatever climate it is in instead of making every basin wet. At zero,
+	// terrain reads the climate's moisture unchanged and the basin fields are
+	// geography nothing consumes — which is a legitimate setting and is what a
+	// bisecting tuner sets it to.
+	MoistureWeight float64
+}
+
+// TerrainConfig is where the ordered rules of DESIGN.md 17 are cut.
+//
+// Every value here is a threshold on a scalar the generator already produces,
+// and none of it is derived from a generated sample: a threshold taken from the
+// minimum and maximum of a window would make the world depend on what has been
+// looked at. DESIGN.md 33.5.
+//
+// The fields are grouped by the rule that reads them, in the order the rules
+// run, so the struct and Config.classifyTerrain can be read side by side.
+type TerrainConfig struct {
+	// The two depth thresholds that cut ocean water into deep ocean, ocean, and
+	// shallow sea. Both are negative, because zero is sea level, and they are
+	// separate from ElevationBands.DeepWater on purpose: the elevation band is
+	// what a game reads as "how deep is this", and moving one of these must not
+	// move that.
+	//
+	// Coastal water has no threshold. It is water with a land neighbor, which
+	// is a fact about the six tiles around it rather than about its depth.
+	DeepOceanDepth float64
+	OceanDepth     float64
+
+	// IceHeat is the heat at or below which land is under permanent ice, and
+	// AlpineHeat is the heat at or below which a mountain is alpine rather than
+	// bare rock. The first is above the elevated rules and the second inside
+	// them, so an icecap on a mountain is ice and alpine terrain is the cold
+	// mountain that is not under one.
+	IceHeat    float64
+	AlpineHeat float64
+
+	// Volcanic is the fbm ladder the volcanic tendency is drawn from. Its
+	// wavelength is the span of a volcanic province rather than of a cone; see
+	// Generator.volcanicAt.
+	Volcanic LadderConfig
+
+	// VolcanicFieldWeight and VolcanicBiasWeight are what the field and the
+	// region's volcanic bias are worth against each other.
+	VolcanicFieldWeight float64
+	VolcanicBiasWeight  float64
+
+	// VolcanicElevation is the uplift volcanic terrain needs: below it the
+	// tendency produces nothing, however strong it is. A volcanic province
+	// under the sea is a real thing and it is not a thing this vocabulary has a
+	// word for.
+	VolcanicElevation float64
+
+	// VolcanoThreshold is the tendency a cone needs and VolcanoRelief is the
+	// concentrated relief it needs beside it; VolcanicHighlandThreshold is the
+	// lower tendency that makes the ground around one volcanic highland.
+	//
+	// The first two together are what make a volcano rare without anything
+	// being rolled for: three conditions on three continuous fields, which is
+	// the distinction DESIGN.md 33.1 draws between a classification and a
+	// per-tile draw.
+	VolcanoThreshold          float64
+	VolcanoRelief             float64
+	VolcanicHighlandThreshold float64
+
+	// HillsRelief is the steepness that makes ground hills below the highland
+	// band. The highland band itself is hills whatever its relief.
+	HillsRelief float64
+
+	// The three conditions a wetland needs, all at once: wet enough, low
+	// enough, and flat enough. Water stands where it is neither drained by a
+	// slope nor run off the edge of a highland, so a rule that read only the
+	// moisture would put a swamp on a hillside.
+	//
+	// WetlandWetness is read against the wetness of DESIGN.md 17.1 — moisture
+	// after the basin product — which is what makes a wet basin read as marsh,
+	// swamp, or bog, and is the whole of what basin geography ships as.
+	WetlandWetness   float64
+	WetlandElevation float64
+	WetlandRelief    float64
+
+	// BogHeat and SwampHeat divide the wetlands by climate, which is what
+	// DESIGN.md 17 distinguishes them by: a bog is the cold one, a swamp the
+	// warm one, and a marsh the open saturated lowland in between.
+	BogHeat   float64
+	SwampHeat float64
+
+	// BadlandsRelief is the steepness that makes a desert badlands. It is the
+	// one exception inside the climate cover table, and it is there because the
+	// dry family's own evidence in DESIGN.md 17 is "low moisture, heat, exposed
+	// relief".
+	BadlandsRelief float64
+}
+
 // LadderConfig is one fbm ladder: where it starts, how many octaves it runs,
 // and how the wavelength and the amplitude change between them.
 //
@@ -419,6 +558,58 @@ func DefaultConfig() Config {
 			MoistureBands: MoistureBands{Arid: -0.6, Dry: -0.2, Moderate: 0.2, Humid: 0.6},
 		},
 
+		Basin: BasinConfig{
+			// 670 hexes down to 167: a continental interior that drains
+			// nowhere.
+			Broad: LadderConfig{WavelengthMiles: 4000, Octaves: 3, Lacunarity: 2, Gain: 0.5},
+			// 130 hexes down to 16: one basin.
+			Regional: LadderConfig{WavelengthMiles: 780, Octaves: 4, Lacunarity: 2, Gain: 0.5},
+			// 20 hexes down to 5: the floor of one.
+			Local: LadderConfig{WavelengthMiles: 120, Octaves: 3, Lacunarity: 2, Gain: 0.5},
+
+			// Coarse to fine and descending, for the reason the elevation
+			// weights are: a basin field whose local scale outweighed its
+			// regional one would be speckle rather than a hollow.
+			BroadWeight:    1,
+			RegionalWeight: 0.6,
+			LocalWeight:    0.25,
+			BiasWeight:     0.4,
+
+			// A deep basin moves moisture by about a third of what it already
+			// is, which is enough to take a humid lowland to saturated and an
+			// arid one to the bottom of its scale without either becoming a
+			// different climate.
+			MoistureWeight: 0.6,
+		},
+
+		Terrain: TerrainConfig{
+			DeepOceanDepth: -0.35,
+			OceanDepth:     -0.1,
+
+			IceHeat:    -0.82,
+			AlpineHeat: -0.3,
+
+			// 150 hexes down to 37: a province, not a cone.
+			Volcanic:            LadderConfig{WavelengthMiles: 900, Octaves: 3, Lacunarity: 2, Gain: 0.5},
+			VolcanicFieldWeight: 1,
+			VolcanicBiasWeight:  0.5,
+
+			VolcanicElevation:         0.3,
+			VolcanoThreshold:          0.65,
+			VolcanoRelief:             0.45,
+			VolcanicHighlandThreshold: 0.55,
+
+			HillsRelief: 0.6,
+
+			WetlandWetness:   0.4,
+			WetlandElevation: 0.15,
+			WetlandRelief:    0.3,
+			BogHeat:          -0.25,
+			SwampHeat:        0.3,
+
+			BadlandsRelief: 0.4,
+		},
+
 		MacroRegionSizeHexes: 512,
 		RegionSizeHexes:      128,
 		ChunkSizeHexes:       32,
@@ -455,6 +646,10 @@ func (c Config) Validate() error {
 		{"Climate.Heat", c.Climate.Heat},
 		{"Climate.Moisture", c.Climate.Moisture},
 		{"Climate.MoistureVariation", c.Climate.MoistureVariation},
+		{"Basin.Broad", c.Basin.Broad},
+		{"Basin.Regional", c.Basin.Regional},
+		{"Basin.Local", c.Basin.Local},
+		{"Terrain.Volcanic", c.Terrain.Volcanic},
 	} {
 		if err := f.ladder.validate(f.name); err != nil {
 			return err
@@ -509,6 +704,14 @@ func (c Config) Validate() error {
 	}
 
 	if err := c.Climate.validate(); err != nil {
+		return err
+	}
+
+	if err := c.Basin.validate(); err != nil {
+		return err
+	}
+
+	if err := c.Terrain.validate(c.Elevation.Bands); err != nil {
 		return err
 	}
 
@@ -716,6 +919,198 @@ func checkBandLadder(prefix string, names []string, values []float64) error {
 			return &ConfigError{Field: name, Value: v, Below: below, Err: ErrNotAscending}
 		}
 		floor, below = v, name
+	}
+	return nil
+}
+
+// validate reports the first reason the basin configuration cannot be used.
+//
+// The three ladders are checked with the others in Config.Validate, so what is
+// left here is the four weights and the moisture amount.
+func (bc BasinConfig) validate() error {
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Basin.BroadWeight", bc.BroadWeight},
+		{"Basin.RegionalWeight", bc.RegionalWeight},
+		{"Basin.LocalWeight", bc.LocalWeight},
+		{"Basin.BiasWeight", bc.BiasWeight},
+	} {
+		if !isFinite(f.value) {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotFinite}
+		}
+		// Positive rather than merely non-negative, for the reason the
+		// elevation weights are: a weight of zero silences a term whose field
+		// is still evaluated for every tile in the world, and the setting that
+		// means "do not read this" is MoistureWeight, which silences the whole
+		// composite at once.
+		if f.value <= 0 {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotPositive}
+		}
+	}
+
+	// Bounded above by one, which is not an arbitrary round number: wetness is
+	// moisture*(1 + w*basin) and basin reaches -1, so at w = 1 a rise erases
+	// the climate's moisture entirely and past it the product changes sign.
+	// A rise that made a dry place wet would be the composition running
+	// backwards, which is exactly the defect the product form exists to avoid.
+	// Zero is the other end and is legitimate: terrain then reads the climate's
+	// moisture unchanged.
+	return checkUnit("Basin.MoistureWeight", bc.MoistureWeight)
+}
+
+// validate reports the first reason the terrain configuration cannot be used.
+//
+// The volcanic ladder is checked with the others in Config.Validate, so what is
+// left here is the thresholds. Three pairs of them must ascend, and each pair
+// is a rule that would otherwise be unreachable rather than merely odd — which
+// is the defect ErrNotAscending exists for and the one the distribution test of
+// DESIGN.md 30.8 would otherwise be the only thing to catch.
+//
+// It takes the elevation band ladder because the wetland rule and the volcanic
+// rule are both cut on the elevation scalar, and a threshold above the mountain
+// band is a rule that can only fire where another rule has already claimed the
+// tile.
+func (tc TerrainConfig) validate(bands ElevationBands) error {
+	// The two ocean depths. Both are below sea level, because water is, and
+	// deep ocean is deeper than ocean.
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Terrain.DeepOceanDepth", tc.DeepOceanDepth},
+		{"Terrain.OceanDepth", tc.OceanDepth},
+	} {
+		if !isFinite(f.value) {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotFinite}
+		}
+		if f.value < -1 || f.value >= 0 {
+			return &ConfigError{Field: f.name, Value: f.value, Lo: -1, Hi: 0, Err: ErrOutOfRange}
+		}
+	}
+	if tc.OceanDepth <= tc.DeepOceanDepth {
+		return &ConfigError{
+			Field: "Terrain.OceanDepth", Value: tc.OceanDepth,
+			Below: "Terrain.DeepOceanDepth", Err: ErrNotAscending,
+		}
+	}
+
+	// The heat thresholds, each strictly inside the clamped scalar's range for
+	// the reason checkBandLadder's are.
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Terrain.IceHeat", tc.IceHeat},
+		{"Terrain.AlpineHeat", tc.AlpineHeat},
+		{"Terrain.BogHeat", tc.BogHeat},
+		{"Terrain.SwampHeat", tc.SwampHeat},
+		{"Terrain.WetlandWetness", tc.WetlandWetness},
+		{"Terrain.VolcanoThreshold", tc.VolcanoThreshold},
+		{"Terrain.VolcanicHighlandThreshold", tc.VolcanicHighlandThreshold},
+	} {
+		if err := checkSignedThreshold(f.name, f.value); err != nil {
+			return err
+		}
+	}
+
+	// Ice is colder than alpine, or every alpine tile is already under ice and
+	// alpine terrain exists in the vocabulary and nowhere else.
+	if tc.AlpineHeat <= tc.IceHeat {
+		return &ConfigError{
+			Field: "Terrain.AlpineHeat", Value: tc.AlpineHeat,
+			Below: "Terrain.IceHeat", Err: ErrNotAscending,
+		}
+	}
+	// A bog is colder than a swamp, or the marsh between them is unreachable.
+	if tc.SwampHeat <= tc.BogHeat {
+		return &ConfigError{
+			Field: "Terrain.SwampHeat", Value: tc.SwampHeat,
+			Below: "Terrain.BogHeat", Err: ErrNotAscending,
+		}
+	}
+	// A cone needs a stronger tendency than the ground around it, or the
+	// highland rule is a cone rule that also fires on flat ground.
+	if tc.VolcanoThreshold <= tc.VolcanicHighlandThreshold {
+		return &ConfigError{
+			Field: "Terrain.VolcanoThreshold", Value: tc.VolcanoThreshold,
+			Below: "Terrain.VolcanicHighlandThreshold", Err: ErrNotAscending,
+		}
+	}
+
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Terrain.VolcanicFieldWeight", tc.VolcanicFieldWeight},
+		{"Terrain.VolcanicBiasWeight", tc.VolcanicBiasWeight},
+	} {
+		if !isFinite(f.value) {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotFinite}
+		}
+		if f.value <= 0 {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotPositive}
+		}
+	}
+
+	// The relief thresholds. Relief is already in [0, 1] and one is reachable,
+	// so both ends are legitimate settings.
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Terrain.VolcanoRelief", tc.VolcanoRelief},
+		{"Terrain.HillsRelief", tc.HillsRelief},
+		{"Terrain.WetlandRelief", tc.WetlandRelief},
+		{"Terrain.BadlandsRelief", tc.BadlandsRelief},
+	} {
+		if err := checkUnit(f.name, f.value); err != nil {
+			return err
+		}
+	}
+
+	// The two elevation thresholds. Both are land, so both are above sea level,
+	// and both are below the mountain band: a volcanic rule above it could only
+	// fire where the mountain rule has already claimed the tile, and a wetland
+	// rule above it is a marsh on a summit.
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Terrain.VolcanicElevation", tc.VolcanicElevation},
+		{"Terrain.WetlandElevation", tc.WetlandElevation},
+	} {
+		if err := checkUnit(f.name, f.value); err != nil {
+			return err
+		}
+		if f.value <= 0 {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotPositive}
+		}
+		if f.value >= bands.Mountain {
+			return &ConfigError{
+				Field: f.name, Value: f.value,
+				Lo: 0, Hi: bands.Mountain, Err: ErrOutOfRange,
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkSignedThreshold rejects a threshold on a clamped [-1, +1] scalar that is
+// not strictly inside that range.
+//
+// The interval is open at both ends for the reason checkBandLadder's is: the
+// scalars these cut are clamped, so a threshold at -1 fires only for a value
+// that has saturated and one at +1 fires for nothing at all. Either is a rule
+// that can never be reached in any ordinary way.
+func checkSignedThreshold(field string, v float64) error {
+	if !isFinite(v) {
+		return &ConfigError{Field: field, Value: v, Err: ErrNotFinite}
+	}
+	if v <= -1 || v >= 1 {
+		return &ConfigError{Field: field, Value: v, Lo: -1, Hi: 1, Err: ErrOutOfRange}
 	}
 	return nil
 }

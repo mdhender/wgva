@@ -456,3 +456,103 @@ func TestGoldenClimateCoversEveryBand(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The basin composite, the volcanic tendency, and terrain
+// ---------------------------------------------------------------------------
+
+// The fifth golden table: the two fields terrain reads that nothing else does,
+// the wetness they produce, and the terrain the whole classifier arrives at,
+// at the same coordinates under the same seed and the same defaults.
+//
+// A separate table again, for the reason the others are separate from each
+// other. What it pins that nothing above it does is the *placement* of basin
+// influence. DESIGN.md 17.1 requires it to enter terrain as a product with
+// moisture and to enter elevation nowhere at all, and the four tables together
+// are what enforce that: adding this one added columns and moved none of the
+// ones already there. If a basin term ever finds its way into the elevation
+// composite, the elevation and climate tables move and this is how anyone will
+// know which change did it.
+//
+// The terrain is recorded beside the floats for the reason the bands are in the
+// tables above: a threshold moved by a hair moves no float here and moves a
+// classification, and the two failures point at different commits. What this
+// table does *not* do is cover the vocabulary — twenty-four coordinates reach
+// six terrains and there are twenty-seven — and that is
+// TestTerrainDistribution's job rather than a gap here.
+//
+// Recorded under AlgorithmVersion 5 at world radius 32767.
+
+// goldenTerrainRow is one coordinate, the float64 bits of the basin composite,
+// the volcanic tendency, and the wetness the basin product yields, and the
+// terrain the tile classifies to.
+type goldenTerrainRow struct {
+	q, r     int64
+	basin    uint64
+	volcanic uint64
+	wetness  uint64
+	terrain  Terrain
+}
+
+// goldenTerrainValues is one row per coordinate in goldenCoords, in that order.
+var goldenTerrainValues = []goldenTerrainRow{
+	{0, 0, 0x3fd5b4b6176e2689, 0x3fbe4148fadc5d3c, 0xbfe536f6a14aaf03, TerrainOcean},
+	{1, 0, 0x3fd39b3de7259f29, 0x3fc32ef8cf53587b, 0xbfe553aefee220d4, TerrainOcean},
+	{0, 1, 0x3fd4812b98997216, 0x3fbe6b448a99d810, 0xbfe4dc35ac3621c0, TerrainOcean},
+	{-1, 0, 0x3fd7092bb284533c, 0x3fb65f19d1c87687, 0xbfe598c1ce20df53, TerrainOcean},
+	{0, -1, 0x3fd7e87ba34dd975, 0x3fbbbe7ad13e5dc0, 0xbfe5e5c272f59f04, TerrainOcean},
+	{1, -1, 0x3fd55ef682b1eca3, 0x3fc22391dbdef218, 0xbfe5b9c0f2bead3c, TerrainOcean},
+	{-1, 1, 0x3fd4b6f2a608a594, 0x3fb7720d410daab1, 0xbfe539d9827c7acf, TerrainOcean},
+	{7, 11, 0x3fd668080b17dab4, 0x3fac2304c297ab4d, 0xbfe7cd3e5669f282, TerrainDeepOcean},
+	{-7, 11, 0x3fdf2161c70ba20e, 0xbfc16fc472958663, 0xbfe9cc0b7b36d71b, TerrainOcean},
+	{7, -11, 0x3fd01bf24d71f702, 0x3fbd6b6fddf93055, 0xbfe38f0b9c5091ab, TerrainCoastalWater},
+	{-7, -11, 0x3fd590d63849facb, 0x3fae48ca96be6cc1, 0xbfe4c166b2fcd767, TerrainHills},
+	{1000, 0, 0x3fd731ed472cb29a, 0x3fe0484a8267f717, 0x3fd0b78831ba0117, TerrainDeepOcean},
+	{0, 1000, 0x3fb535d8bd1cfa6f, 0x3fd7a1c1381ba020, 0xbf9428d71a154e37, TerrainDeepOcean},
+	{-1000, -1000, 0xbfd1052849a3d43e, 0xbfcaca03ae2efc7b, 0x3fc3a7d8e61ad8a7, TerrainDeepOcean},
+	{12345, -6789, 0xbfa5a025ed55758e, 0xbfbec438223a22f7, 0xbfae01b36107f055, TerrainDeepOcean},
+	{32767, 0, 0x3fd47017aa94252c, 0xbf97626dd192a4e0, 0x3f91de307b4abe91, TerrainHills},
+	{0, 32767, 0xbfc4340c9367720b, 0x3fd113a3d9cdbb6b, 0xbfdfda8a5b26761b, TerrainHills},
+	{-32767, 0, 0x3f430316558191c7, 0xbfd1256615151dbd, 0x3fe09342129968f1, TerrainCoastalWater},
+	{0, -32767, 0x3fd48b2e4f6c0d09, 0x3fd9edda95f1b9d4, 0x3fe383243e0a7c93, TerrainCoastalWater},
+	{32767, -32767, 0x3fb9c9702d5978db, 0x3fd81d228e016de5, 0x3fe49dcd4fd3fb00, TerrainHills},
+	{-32767, 32767, 0x3fbd3e8b6abcbef7, 0xbfd1278a48a0428e, 0xbfad8cb82d609a71, TerrainCoastalWater},
+	{16384, -32767, 0xbfb9c5f8b3f5059b, 0xbfbe3b2909703860, 0xbfc91b17c1077f5a, TerrainShallowSea},
+	{65535, -32767, 0x3fd5b4b6176e2689, 0x3fbe4148fadc5d3c, 0xbfe536f6a14aaf03, TerrainOcean},
+	{32768, 0, 0x3fbd3e8b6abcbef7, 0xbfd1278a48a0428e, 0xbfad8cb82d609a71, TerrainCoastalWater},
+}
+
+func TestGoldenTerrain(t *testing.T) {
+	if len(goldenTerrainValues) != len(goldenCoords) {
+		t.Fatalf("the terrain golden table has %d rows for %d coordinates", len(goldenTerrainValues), len(goldenCoords))
+	}
+
+	g := NewDefault(goldenSeed)
+	cfg := g.Config()
+	for i, row := range goldenTerrainValues {
+		if [2]int64{row.q, row.r} != goldenCoords[i] {
+			t.Fatalf("row %d is for (%d, %d), want (%d, %d)", i, row.q, row.r, goldenCoords[i][0], goldenCoords[i][1])
+		}
+		c := NewCoord(row.q, row.r)
+		s := g.Sample(c)
+
+		for _, f := range []struct {
+			name string
+			got  uint64
+			want uint64
+		}{
+			{"basin", math.Float64bits(s.BasinInfluence), row.basin},
+			{"volcanic", math.Float64bits(s.Volcanic), row.volcanic},
+			{"wetness", math.Float64bits(cfg.wetness(s.Moisture, s.BasinInfluence)), row.wetness},
+		} {
+			if f.got != f.want {
+				t.Errorf("%s at (%d, %d) = %#016x (%v), want %#016x (%v)",
+					f.name, row.q, row.r, f.got, math.Float64frombits(f.got), f.want, math.Float64frombits(f.want))
+			}
+		}
+
+		if got := g.TerrainAt(c); got != row.terrain {
+			t.Errorf("terrain at (%d, %d) = %v, want %v", row.q, row.r, got, row.terrain)
+		}
+	}
+}

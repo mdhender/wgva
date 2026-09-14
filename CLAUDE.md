@@ -4,31 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-**Phases 1 through 5 have landed.** The root `wgva` package carries coordinates,
+**Phases 1 through 6 have landed.** The root `wgva` package carries coordinates,
 the wraparound normalizer, hashing, the owned noise, the `Field` composition tree
 with fbm and domain warping, the region anchors and their barycentric blend, the
 elevation composite with its ridge structure and land/water classification, the
 two-axis climate composite with its broad zone fields and elevation lapse rate,
-and the `Config`/`Generator` skeleton; `internal/mathx` carries the floor
+the basin composite and the volcanic tendency, the ordered terrain classifier,
+`Tile`, and the `Config`/`Generator` skeleton; `internal/mathx` carries the floor
 helpers, `Mul`, and the exact 128-bit arithmetic. Around it, `config` owns the
 canonical CBOR, the fingerprint, and the TOML file; `render` owns the viewport,
 the layers, and the two renders; `view` owns the window grammar; and
 `cmd/wgva-tune` is the terrain tuning tool.
 
-What does not exist yet is everything from phase 6 on: basins, terrain, the rim
-profile, and every `store` or player-facing thing. There is no `Tile` —
-elevation is reached through `ElevationAt`, `ElevationBandAt`, `Relief`, and
-`Sample`, climate through `HeatAt`, `MoistureAt`, `ClimateAt`, and `Sample`, and
-the tile that carries all three classifications arrives with terrain. Of the
-region parameters the elevation bias, the roughness, the ridge orientation, and
-now both climate biases are consumed; the basin and volcanic biases and the
-variation wait for the phases that read them. Five of the seventeen layers
-`DESIGN.md` 29 lists arrive with the phases that compute them — including
-`climate` itself, which is the two-axis band table rather than a ramp and lands
-in phase 6 beside the terrain vocabulary it shares a legend shape with. And
-`config/fingerprint_test.go` deliberately does not yet carry the written-down
-fingerprint constant — writing it down is what *settles* the defaults, and phase
-7 is where that decision belongs.
+What does not exist yet is everything from phase 7 on: the rim profile, the
+settled defaults, and every `store` or player-facing thing. **Inland water is
+declared and deliberately emitted nowhere** — `DESIGN.md` 17.1 is the decision
+record, `TerrainInlandSea` and `TerrainLake` keep their numbers, and the
+distribution test asserts both stay at zero. Of the region parameters only the
+variation is still unread. `Tile.Rim` is false everywhere and the classifier's
+rim rule is reached by nothing: the *order* is what phase 6 settled, and phase 7
+is what sets the flag. Sixteen of the seventeen layers `DESIGN.md` 29 lists
+exist; only `rim` waits. And `config/fingerprint_test.go` deliberately does not
+yet carry the written-down fingerprint constant — writing it down is what
+*settles* the defaults, and phase 7 is where that decision belongs.
+
+The batch API of `DESIGN.md` 20 and the distribution readout of 29.1 are both
+written and unbuilt. Neither is phase 6's; both want a caller, and the caller is
+phase 8.
 
 `DESIGN.md` is the specification and `AGENTS.md` is the working guidance, and
 both are still well ahead of the code. Treat a disagreement between them and the

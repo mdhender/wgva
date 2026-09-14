@@ -125,7 +125,7 @@ func TestRefusals(t *testing.T) {
 		{"q is off the map", url.Values{"q": {"32768"}}, "q", view.ErrOutOfRange},
 		{"r is off the map", url.Values{"r": {"-40000"}}, "r", view.ErrOutOfRange},
 		{"s disagrees", url.Values{"q": {"3"}, "r": {"4"}, "s": {"0"}}, "s", view.ErrOutOfRange},
-		{"layer does not exist", url.Values{"layer": {"terrain"}}, "layer", render.ErrUnknownLayer},
+		{"layer does not exist", url.Values{"layer": {"rim"}}, "layer", render.ErrUnknownLayer},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

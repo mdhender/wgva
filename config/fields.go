@@ -69,7 +69,9 @@ type Field struct {
 // The order is the order a person reads: what the world is, then the four
 // continuous scales coarse to fine, then the warp, then what the elevation
 // composite makes of them, then the ridge structure, then the two climate axes,
-// then the addressing hierarchy, then the rim.
+// then the basin scales and what they are worth, then the volcanic tendency,
+// then where the terrain rules are cut, then the addressing hierarchy, then the
+// rim.
 func Fields() []Field { return fieldTable }
 
 var fieldTable = buildFieldTable()
@@ -125,6 +127,20 @@ func buildFieldTable() []Field {
 	table = append(table, moistureFields()...)
 	table = append(table, ladderFields("moisture_variation", "Climate.MoistureVariation",
 		"the local moisture variation of DESIGN.md 16: why two neighboring valleys differ")...)
+
+	table = append(table, ladderFields("basin_broad", "Basin.Broad",
+		"the broadest scale of enclosed low ground: a continental interior that drains nowhere")...)
+	table = append(table, ladderFields("basin_regional", "Basin.Regional",
+		"the middle scale of enclosed low ground: one basin")...)
+	table = append(table, ladderFields("basin_local", "Basin.Local",
+		"the finest scale of enclosed low ground: the floor of one basin")...)
+	table = append(table, basinFields()...)
+
+	table = append(table, ladderFields("volcanic", "Terrain.Volcanic",
+		"the volcanic tendency; its wavelength is the span of a province rather than of a cone, because what draws one cone out of a province is the uplift and the relief terrain also reads")...)
+	table = append(table, volcanicFields()...)
+
+	table = append(table, terrainFields()...)
 
 	return append(table, []Field{
 		{
@@ -211,6 +227,128 @@ func elevationFields() []Field {
 		{
 			Key: "elevation_mountain", Path: "Elevation.Bands.Mountain", Group: "elevation", Kind: ValueScalar,
 			Doc: "where highland becomes mountain",
+		},
+	}
+}
+
+// basinFields returns the keys of the basin composite: what the three scales
+// and the region's basin bias are worth against each other, and what the blend
+// is worth as a multiplier on the moisture terrain reads.
+//
+// They are their own group rather than part of the terrain one because of where
+// basin influence does not appear. It never enters elevation, and a reader who
+// found these keys under the elevation composite would reasonably conclude the
+// opposite; see DESIGN.md 17.1.
+func basinFields() []Field {
+	return []Field{
+		{
+			Key: "basin_broad_weight", Path: "Basin.BroadWeight", Group: "basin", Kind: ValueScalar,
+			Doc: "what the broadest basin scale is worth in the composite; the weights are relative and are normalized by their own total",
+		},
+		{
+			Key: "basin_regional_weight", Path: "Basin.RegionalWeight", Group: "basin", Kind: ValueScalar,
+			Doc: "what the middle basin scale is worth in the composite",
+		},
+		{
+			Key: "basin_local_weight", Path: "Basin.LocalWeight", Group: "basin", Kind: ValueScalar,
+			Doc: "what the finest basin scale is worth in the composite",
+		},
+		{
+			Key: "basin_bias_weight", Path: "Basin.BiasWeight", Group: "basin", Kind: ValueScalar,
+			Doc: "what a region's basin bias is worth against the three fields",
+		},
+		{
+			Key: "basin_moisture_weight", Path: "Basin.MoistureWeight", Group: "basin", Kind: ValueScalar,
+			Doc: "how far a basin may move the moisture terrain is classified from, in [0, 1]; wetness is moisture + this*basin*moisture, so a basin deepens whatever climate it is in rather than making every basin wet, and zero leaves the climate's moisture unchanged",
+		},
+	}
+}
+
+// volcanicFields returns the keys of the volcanic tendency: what the field and
+// the region's bias are worth against each other, and the three thresholds that
+// turn the result into terrain.
+//
+// They sit under the same heading as the field's own ladder, for the reason the
+// heat band keys sit under the heat field's.
+func volcanicFields() []Field {
+	return []Field{
+		{
+			Key: "volcanic_field_weight", Path: "Terrain.VolcanicFieldWeight", Group: "volcanic", Kind: ValueScalar,
+			Doc: "what the volcanic field is worth against the region's volcanic bias; the weights are relative and are normalized by their own total",
+		},
+		{
+			Key: "volcanic_bias_weight", Path: "Terrain.VolcanicBiasWeight", Group: "volcanic", Kind: ValueScalar,
+			Doc: "what a region's volcanic bias is worth against the field",
+		},
+		{
+			Key: "volcanic_elevation", Path: "Terrain.VolcanicElevation", Group: "volcanic", Kind: ValueScalar,
+			Doc: "the uplift volcanic terrain needs; below it the tendency produces nothing, however strong it is",
+		},
+		{
+			Key: "volcano_threshold", Path: "Terrain.VolcanoThreshold", Group: "volcanic", Kind: ValueScalar,
+			Doc: "the tendency a cone needs, in (-1, +1); it exceeds the volcanic highland threshold, and together with the relief it is what makes a volcano rare without anything being rolled for",
+		},
+		{
+			Key: "volcano_relief", Path: "Terrain.VolcanoRelief", Group: "volcanic", Kind: ValueScalar,
+			Doc: "the concentrated relief a cone needs beside the tendency, in [0, 1]",
+		},
+		{
+			Key: "volcanic_highland_threshold", Path: "Terrain.VolcanicHighlandThreshold", Group: "volcanic", Kind: ValueScalar,
+			Doc: "the lower tendency that makes raised ground volcanic highland",
+		},
+	}
+}
+
+// terrainFields returns the thresholds the ordered rules of DESIGN.md 17 are
+// cut at, in the order the rules run: the ocean depths, the two heat
+// thresholds the frozen family is drawn from, the steepness that makes hills,
+// the three conditions a wetland needs together with the two heats that divide
+// them, and the steepness that makes a desert badlands.
+func terrainFields() []Field {
+	return []Field{
+		{
+			Key: "terrain_deep_ocean_depth", Path: "Terrain.DeepOceanDepth", Group: "terrain", Kind: ValueScalar,
+			Doc: "the elevation at or below which ocean water is deep ocean; negative, because zero is sea level, and separate from the deep-water elevation band so that moving one does not move the other",
+		},
+		{
+			Key: "terrain_ocean_depth", Path: "Terrain.OceanDepth", Group: "terrain", Kind: ValueScalar,
+			Doc: "where deep ocean becomes ocean; above it is shallow sea, and water with a land neighbor is coastal water whatever its depth",
+		},
+		{
+			Key: "terrain_ice_heat", Path: "Terrain.IceHeat", Group: "terrain", Kind: ValueScalar,
+			Doc: "the heat at or below which land is under permanent ice, in (-1, +1); below the alpine threshold, or every alpine tile would already be ice",
+		},
+		{
+			Key: "terrain_alpine_heat", Path: "Terrain.AlpineHeat", Group: "terrain", Kind: ValueScalar,
+			Doc: "the heat at or below which a mountain is alpine rather than bare rock",
+		},
+		{
+			Key: "terrain_hills_relief", Path: "Terrain.HillsRelief", Group: "terrain", Kind: ValueScalar,
+			Doc: "the steepness that makes ground hills below the highland band, in [0, 1]; the highland band itself is hills whatever its relief",
+		},
+		{
+			Key: "terrain_wetland_wetness", Path: "Terrain.WetlandWetness", Group: "terrain", Kind: ValueScalar,
+			Doc: "how wet a wetland is, in (-1, +1); it is read against the wetness of DESIGN.md 17.1 — moisture after the basin product — which is what makes a wet basin read as marsh, swamp, or bog",
+		},
+		{
+			Key: "terrain_wetland_elevation", Path: "Terrain.WetlandElevation", Group: "terrain", Kind: ValueScalar,
+			Doc: "how low a wetland is; water stands where it has not run off the edge of a highland",
+		},
+		{
+			Key: "terrain_wetland_relief", Path: "Terrain.WetlandRelief", Group: "terrain", Kind: ValueScalar,
+			Doc: "how flat a wetland is, in [0, 1]; a rule that read only the moisture would put a swamp on a hillside",
+		},
+		{
+			Key: "terrain_bog_heat", Path: "Terrain.BogHeat", Group: "terrain", Kind: ValueScalar,
+			Doc: "the heat at or below which a wetland is a bog; below the swamp threshold, or the marsh between them is unreachable",
+		},
+		{
+			Key: "terrain_swamp_heat", Path: "Terrain.SwampHeat", Group: "terrain", Kind: ValueScalar,
+			Doc: "the heat at or above which a wetland is a swamp; between the two is a marsh",
+		},
+		{
+			Key: "terrain_badlands_relief", Path: "Terrain.BadlandsRelief", Group: "terrain", Kind: ValueScalar,
+			Doc: "the steepness that makes a desert badlands, in [0, 1]; the dry family's own evidence is low moisture, heat, and exposed relief",
 		},
 	}
 }

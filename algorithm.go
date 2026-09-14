@@ -67,4 +67,14 @@ const WorldRadius int64 = 32767
 //	   configuration can be read. No value this version already produced moved:
 //	   climate reads the elevation composite and nothing reads climate, so the
 //	   scale, region, and elevation golden tables stand.
-const AlgorithmVersion uint32 = 4
+//	5  Basins and terrain. The basin composite of DESIGN.md 17 at three scales
+//	   with the region's basin bias, the volcanic tendency, and the ordered
+//	   terrain classifier over elevation, relief, climate, the basin product,
+//	   the volcanic tendency, and the water's edge. Config gained BasinConfig
+//	   and TerrainConfig, so no version 4 configuration can be read. No value
+//	   this version already produced moved: basin influence enters terrain as a
+//	   product with moisture and enters elevation nowhere, which is what lets
+//	   the scale, region, elevation, and climate golden tables all stand
+//	   unchanged. Inland water is declared and is emitted nowhere;
+//	   DESIGN.md 17.1.
+const AlgorithmVersion uint32 = 5

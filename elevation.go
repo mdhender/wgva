@@ -291,16 +291,58 @@ func (g *Generator) IsLand(c Coord) bool { return g.elevationScalar(c) > 0 }
 // flat. That is correct and is not a special case: a forced constant has no
 // slope.
 func (g *Generator) Relief(c Coord) float64 {
-	here := g.elevationScalar(c)
+	return g.neighborhoodAt(c, g.elevationScalar(c)).relief
+}
 
+// neighborhood is what the six neighboring elevation scalars are worth: how
+// steep this tile is, and whether it stands at the water's edge.
+//
+// The three travel together because they are one walk. Relief is the reason the
+// walk is paid for, and once it has been, "is there land next door" and "is
+// there water next door" cost nothing more — which is what makes the coast and
+// the coastal water of DESIGN.md 17 affordable at all.
+type neighborhood struct {
+	// relief is the local steepness, in [0, 1].
+	relief float64
+
+	// landNeighbor and waterNeighbor report whether any of the six neighbors is
+	// above sea level and whether any is at or below it. Both are false only
+	// for a tile with no neighbors, which does not exist.
+	landNeighbor  bool
+	waterNeighbor bool
+}
+
+// neighborhoodAt walks the six neighbors of a coordinate whose own elevation
+// scalar is already in hand.
+//
+// The six differences are accumulated in fixed direction order 0..5. Floating
+// point addition is not associative, so the order is part of the algorithm; see
+// DESIGN.md 25.3. Sampling neighbors creates no dependency problem because
+// every neighbor is a pure function of its own coordinate.
+//
+// It takes the tile's own elevation rather than reading it, so that Tile pays
+// for exactly seven evaluations and Relief for exactly seven, and so that the
+// two cannot drift into computing relief two different ways. Neither calls the
+// other and neither calls Tile; see DESIGN.md 18.
+func (g *Generator) neighborhoodAt(c Coord, here float64) neighborhood {
+	var n neighborhood
 	var total float64
 	for d := range 6 {
-		total += math.Abs(g.elevationScalar(c.Neighbor(d)) - here)
+		e := g.elevationScalar(c.Neighbor(d))
+		total += math.Abs(e - here)
+		// The land/water rule of DESIGN.md 15, applied to a neighbor: above sea
+		// level is land and sea level itself is water.
+		if e > 0 {
+			n.landNeighbor = true
+		} else {
+			n.waterNeighbor = true
+		}
 	}
 
 	// Clamped before it is returned and before anything converts it to a band
 	// index. DESIGN.md 25.5.
-	return min(mathx.Mul(g.cfg.Elevation.ReliefScale, total/6), 1)
+	n.relief = min(mathx.Mul(g.cfg.Elevation.ReliefScale, total/6), 1)
+	return n
 }
 
 // ---------------------------------------------------------------------------

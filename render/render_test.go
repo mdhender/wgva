@@ -255,8 +255,39 @@ func TestLayersAreNamedAndCosted(t *testing.T) {
 		if l.Doc == "" {
 			t.Errorf("%q has nothing to say about itself", l.Name)
 		}
-		if l.Key().Kind != render.KeyRamp {
-			t.Errorf("%q has key kind %d; every layer in this phase is a scalar ramp", l.Name, l.Key().Kind)
+		switch key := l.Key(); key.Kind {
+		case render.KeyRamp:
+			if len(key.Ramp) == 0 {
+				t.Errorf("%q is a scalar ramp with no stops", l.Name)
+			}
+			if key.Hi <= key.Lo {
+				t.Errorf("%q ramps from %v to %v", l.Name, key.Lo, key.Hi)
+			}
+		case render.KeyClimate:
+			// A five by five table, labelled on both axes, row major over the
+			// two band ladders. The count is what colorOf indexes, so a legend
+			// that lost an entry would paint the wrong cells rather than fail.
+			if want := len(key.Rows) * len(key.Cols); len(key.Swatches) != want {
+				t.Errorf("%q has %d swatches for a %d by %d table", l.Name, len(key.Swatches), len(key.Rows), len(key.Cols))
+			}
+			if len(key.Rows) != len(wgva.Heats()) || len(key.Cols) != len(wgva.Moistures()) {
+				t.Errorf("%q is a %d by %d table for %d heat and %d moisture bands",
+					l.Name, len(key.Rows), len(key.Cols), len(wgva.Heats()), len(wgva.Moistures()))
+			}
+		case render.KeyTerrain:
+			// One swatch per declared terrain, at its own value, which is what
+			// makes the legend and the picture one table.
+			if len(key.Swatches) != len(wgva.Terrains()) {
+				t.Errorf("%q has %d swatches for %d declared terrains", l.Name, len(key.Swatches), len(wgva.Terrains()))
+			}
+			for i, tr := range wgva.Terrains() {
+				if i < len(key.Swatches) && key.Swatches[i].Label != tr.String() {
+					t.Errorf("%q swatch %d is %q, want %q; the swatches are indexed by terrain value",
+						l.Name, i, key.Swatches[i].Label, tr)
+				}
+			}
+		default:
+			t.Errorf("%q has key kind %d, which is not a declared one", l.Name, key.Kind)
 		}
 		found, err := render.LayerNamed(l.Name)
 		if err != nil || found.Name != l.Name {
@@ -266,8 +297,13 @@ func TestLayersAreNamedAndCosted(t *testing.T) {
 	if !seen[render.DefaultLayer] {
 		t.Errorf("the default layer %q is not in the registry", render.DefaultLayer)
 	}
-	if _, err := render.LayerNamed("terrain"); !errors.Is(err, render.ErrUnknownLayer) {
+	// The rim layer is the one of DESIGN.md 29's seventeen that does not exist
+	// yet; it arrives with the phase that computes the rim profile.
+	if _, err := render.LayerNamed("rim"); !errors.Is(err, render.ErrUnknownLayer) {
 		t.Fatalf("LayerNamed of a layer that does not exist yet returned %v, want ErrUnknownLayer", err)
+	}
+	if got, want := len(all), 16; got != want {
+		t.Errorf("there are %d layers, want the %d of DESIGN.md 29 that exist", got, want)
 	}
 }
 
@@ -468,6 +504,114 @@ func BenchmarkRenderGrid(b *testing.B) {
 	for b.Loop() {
 		if _, err := render.RenderGrid(g, v, l, 1); err != nil {
 			b.Fatalf("RenderGrid: %v", err)
+		}
+	}
+}
+
+// TestBandLayersPaintSwatchesAndNeverBlends is the assertion the two band
+// layers exist for.
+//
+// A classification is discrete, so every pixel of a `climate` or `terrain`
+// window must be exactly one of the legend's colors. A blend between two of
+// them would be a color that names nothing — and it is precisely what running a
+// classification through a ramp produces, which is the mistake colorOf is
+// shaped to prevent.
+func TestBandLayersPaintSwatchesAndNeverBlends(t *testing.T) {
+	g := wgva.NewDefault(0x0123456789abcdef)
+	v := mustViewport(t, wgva.NewCoord(4000, -2500), 41, 41, 0, 7)
+
+	for _, name := range []string{"climate", "terrain"} {
+		t.Run(name, func(t *testing.T) {
+			l, err := render.LayerNamed(name)
+			if err != nil {
+				t.Fatalf("LayerNamed: %v", err)
+			}
+			img, err := render.RenderGrid(g, v, l, 1)
+			if err != nil {
+				t.Fatalf("RenderGrid: %v", err)
+			}
+
+			allowed := map[color.RGBA]string{}
+			for _, s := range l.Key().Swatches {
+				allowed[s.Color] = s.Label
+			}
+
+			seen := map[color.RGBA]bool{}
+			for row := range v.Rows {
+				for col := range v.Cols {
+					got := img.RGBAAt(col, row)
+					if _, ok := allowed[got]; !ok {
+						t.Fatalf("cell (%d, %d) is %v, which is not one of the %d swatches; a classification must never be blended",
+							col, row, got, len(allowed))
+					}
+					seen[got] = true
+				}
+			}
+			if len(seen) < 2 {
+				t.Fatalf("the whole window is one color; the assertion above is vacuous")
+			}
+
+			// The picture and the legend index one table, so a cell's color is
+			// the swatch at the value the layer sampled.
+			for _, cell := range [][2]int{{0, 0}, {v.Cols / 2, v.Rows / 2}, {v.Cols - 1, v.Rows - 1}} {
+				value := l.Sample(g, v.CoordAt(cell[0], cell[1]))
+				want := l.Key().Swatches[int(value)].Color
+				if got := img.RGBAAt(cell[0], cell[1]); got != want {
+					t.Errorf("cell (%d, %d) sampled %v and was painted %v, want the swatch %v",
+						cell[0], cell[1], value, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestClimateLayerIsTheTwoAxesAndNotACombinedValue asserts the flattened index
+// the climate layer samples is exactly the pair it came from.
+//
+// Flattening is how one []float64 carries every layer's samples, and it is the
+// one place a combined climate value of the kind DESIGN.md 16.1 forbids could
+// creep in. What keeps it honest is that the number is never compared or
+// ordered and the key turns it straight back into two bands.
+func TestClimateLayerIsTheTwoAxesAndNotACombinedValue(t *testing.T) {
+	g := wgva.NewDefault(0x0123456789abcdef)
+	l, err := render.LayerNamed("climate")
+	if err != nil {
+		t.Fatalf("LayerNamed: %v", err)
+	}
+	key := l.Key()
+
+	v := mustViewport(t, wgva.Origin, 21, 21, 0, 101)
+	for row := range v.Rows {
+		for col := range v.Cols {
+			c := v.CoordAt(col, row)
+			tile := g.Tile(c)
+			want := wgva.Climate{Heat: tile.Climate.Heat, Moisture: tile.Climate.Moisture}.String()
+			if got := key.Swatches[int(l.Sample(g, c))].Label; got != want {
+				t.Fatalf("the climate layer at (%d, %d) indexes the swatch %q, want %q", c.Q(), c.R(), got, want)
+			}
+		}
+	}
+}
+
+// TestTerrainLayerCostsSeven pins the one thing a front end takes from the
+// layer list besides the name.
+//
+// Terrain and relief read the six neighboring elevation scalars and cost seven
+// evaluations apiece; everything else costs one, including climate, which reads
+// the elevation at its own tile and nothing around it. A budget counted in
+// tiles could not tell a cheap window from one seven times longer, which is the
+// whole reason Layer.Cost exists.
+func TestTerrainLayerCostsSeven(t *testing.T) {
+	for name, want := range map[string]int{
+		"terrain": 7, "relief": 7,
+		"climate": 1, "basin": 1, "volcanic": 1, "temperature": 1, "moisture": 1,
+	} {
+		l, err := render.LayerNamed(name)
+		if err != nil {
+			t.Fatalf("LayerNamed(%q): %v", name, err)
+		}
+		if l.Cost != want {
+			t.Errorf("%q costs %d evaluations a tile, want %d", name, l.Cost, want)
 		}
 	}
 }

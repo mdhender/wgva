@@ -5,6 +5,8 @@ package render
 import (
 	"errors"
 	"fmt"
+	"image/color"
+	"math"
 	"slices"
 
 	"github.com/mdhender/wgva"
@@ -26,6 +28,13 @@ const (
 	KeyTerrain KeyKind = 3
 )
 
+// Swatch is one entry of a band table or a vocabulary legend: a label and the
+// color the layer paints that value.
+type Swatch struct {
+	Label string
+	Color color.RGBA
+}
+
 // Key is what a front end draws beside a window so the picture can be read.
 type Key struct {
 	Kind KeyKind
@@ -34,6 +43,25 @@ type Key struct {
 	Ramp             Ramp
 	Lo, Hi           float64
 	LoLabel, HiLabel string
+
+	// Swatches are what the layer paints, indexed by the value Layer.Sample
+	// returns. KeyClimate and KeyTerrain only.
+	//
+	// The index is the value rather than a position in a sorted list, which is
+	// what lets the legend and the picture come from one table: a terrain's
+	// swatch is at its own persisted number, and a climate cell's is at its
+	// row-major position in the two band ladders.
+	Swatches []Swatch
+
+	// Rows and Cols label the two axes of a band table, and the swatches are
+	// row-major over them. KeyClimate only.
+	//
+	// They are what makes the legend a table rather than a list of
+	// twenty-five names: the axes are independent, and a legend that ran them
+	// together in one column would be the single combined climate value
+	// DESIGN.md 16.1 forbids, drawn as a picture rather than declared as a
+	// type.
+	Rows, Cols []string
 }
 
 // Layer is one thing a window can be drawn as.
@@ -59,6 +87,30 @@ type Layer struct {
 // Key returns the layer's legend.
 func (l Layer) Key() Key { return l.key }
 
+// colorOf turns one sampled value into the pixel the layer paints.
+//
+// The two shapes are genuinely different operations rather than one with a
+// parameter: a ramp interpolates a continuous scalar and a band table looks up
+// a discrete one. Running a classification through a ramp would blend two
+// terrains into a third color that names nothing.
+//
+// The index is clamped before it is converted, which is DESIGN.md 25.5 applied
+// where it usually bites least and would bite hardest: an out-of-range
+// float-to-int conversion is implementation-specific in Go and differs between
+// amd64 and arm64, and here it would index a slice.
+func colorOf(k Key, value float64) color.RGBA {
+	switch k.Kind {
+	case KeyClimate, KeyTerrain:
+		if math.IsNaN(value) || len(k.Swatches) == 0 {
+			return Background
+		}
+		i := int(min(max(value, 0), float64(len(k.Swatches)-1)))
+		return k.Swatches[i].Color
+	default:
+		return k.Ramp.At(normalize(k, value))
+	}
+}
+
 // Sample returns the layer's value at a coordinate.
 //
 // Renderer pixel coordinates never reach this: a Viewport converts a cell to a
@@ -73,21 +125,20 @@ var ErrUnknownLayer = errors.New("unknown layer")
 
 // AllLayers returns every layer, in a fixed order.
 //
-// DESIGN.md 29 lists seventeen. Twelve of them are here, and they are the twelve
-// that exist: the raw noise scales of DESIGN.md 10, which separate "the noise is
-// wrong" from "the composition is wrong" when a window looks off; the four the
-// elevation composite adds, which separate it further into the four scales
-// alone, the finished scalar, the slope, and the ridge term; the two that draw
-// the blended region influence of DESIGN.md 11.2 — which is what the anchor
+// DESIGN.md 29 lists seventeen. Sixteen of them are here, and they are the
+// sixteen that exist: the raw noise scales of DESIGN.md 10, which separate "the
+// noise is wrong" from "the composition is wrong" when a window looks off; the
+// four the elevation composite adds, which separate it further into the four
+// scales alone, the finished scalar, the slope, and the ridge term; the two that
+// draw the blended region influence of DESIGN.md 11.2 — which is what the anchor
 // lattice has to be looked for in, because a lattice nothing draws is a lattice
-// nobody sees until it is under a coastline; and the two climate axes, drawn
-// apart because they are apart. The `climate` layer that puts them back together
-// as a two-axis band table is not here: it is the one thing in this package that
-// is not a scalar ramp, and it arrives in DESIGN.md 32's phase 6 beside the
-// terrain vocabulary it shares a legend shape with. Terrain, the basins, the
-// volcanic field, and the rim arrive with the phases that compute them too; a
-// layer that named a field nothing generates yet would be a control that draws
-// an error.
+// nobody sees until it is under a coastline; the two climate axes, drawn apart
+// because they are apart, and the band table that puts them back together; the
+// two fields terrain reads that nothing else does; and terrain itself.
+//
+// Only `rim` is missing, and it arrives with the phase that computes the rim
+// profile. A layer that named a field nothing generates yet would be a control
+// that draws an error.
 func AllLayers() []Layer { return slices.Clone(layers) }
 
 // LayerNamed returns the layer with that name.
@@ -236,5 +287,117 @@ func buildLayers() []Layer {
 			},
 			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.MoistureAt(c) },
 		},
+		Layer{
+			Name: "climate",
+			Doc:  "the two-axis climate classification: which of the twenty-five heat and moisture cells a tile falls in",
+			// One evaluation a tile, and DESIGN.md 29 says seven.
+			//
+			// The document is ahead of the code there and appendix D records
+			// which way it was settled: the climate composite reads the
+			// elevation scalar at the tile and nothing around it, so nothing
+			// here looks at a neighbor. Costing it at seven would over-charge
+			// every budget by a factor of seven for work nobody does, and a
+			// budget that refuses affordable windows is a budget people raise
+			// until it stops meaning anything. Only relief and terrain read the
+			// six neighbors.
+			Cost:   1,
+			key:    climateKey(),
+			sample: climateIndexOf,
+		},
+		Layer{
+			Name: "basin",
+			Doc:  "the blended basin influence: -1 a rise that sheds water, 0 neutral ground, +1 a closed hollow; it multiplies the moisture terrain reads and never enters elevation",
+			Cost: 1,
+			key: Key{
+				Kind: KeyRamp, Ramp: BasinRamp,
+				Lo: -1, Hi: +1, LoLabel: "rise", HiLabel: "hollow",
+			},
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.BasinAt(c) },
+		},
+		Layer{
+			Name: "volcanic",
+			Doc:  "the volcanic tendency, which terrain reads only the top of: a province is where the cones can be, not where they are",
+			Cost: 1,
+			key: Key{
+				Kind: KeyRamp, Ramp: VolcanicRamp,
+				Lo: -1, Hi: +1, LoLabel: "quiet", HiLabel: "volcanic",
+			},
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.VolcanicAt(c) },
+		},
+		Layer{
+			Name: "terrain",
+			Doc:  "the game-facing terrain classification of DESIGN.md 17, which is every other layer in this list arriving at one answer",
+			// Seven evaluations a tile, for the reason relief costs seven: the
+			// classifier reads the six neighboring elevation scalars, once for
+			// the slope and once for the water's edge. It is the same walk and
+			// it is paid for once.
+			Cost:   7,
+			key:    terrainKey(),
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return float64(g.TerrainAt(c)) },
+		},
 	)
+}
+
+// climateIndexOf is the two-axis classification flattened to one index, row
+// major over heat and then moisture.
+//
+// Flattening is what lets one []float64 carry every layer's samples, and it is
+// not a combined climate value of the kind DESIGN.md 16.1 forbids: nothing
+// compares two of these or orders them, and the key turns the number straight
+// back into the pair it came from.
+func climateIndexOf(g *wgva.Generator, c wgva.Coord) float64 {
+	cl := g.ClimateAt(c)
+	return float64(int(cl.Heat)*len(wgva.Moistures()) + int(cl.Moisture))
+}
+
+// climateKey builds the two-axis band table legend.
+//
+// The swatches are row major over the two ladders and the axes are labelled
+// separately, so a front end draws a five by five table rather than a list of
+// twenty-five names. That is the shape of the model: the axes are independent,
+// and a legend that ran them together in one column would be asserting an order
+// over the pairs that does not exist.
+func climateKey() Key {
+	heats, moistures := wgva.Heats(), wgva.Moistures()
+
+	k := Key{Kind: KeyClimate}
+	for _, h := range heats {
+		k.Rows = append(k.Rows, h.String())
+	}
+	for _, m := range moistures {
+		k.Cols = append(k.Cols, m.String())
+	}
+	for i, h := range heats {
+		for j, m := range moistures {
+			k.Swatches = append(k.Swatches, Swatch{
+				Label: wgva.Climate{Heat: h, Moisture: m}.String(),
+				Color: climateColors[i][j],
+			})
+		}
+	}
+	return k
+}
+
+// terrainKey builds the terrain vocabulary legend.
+//
+// The swatches are in wgva.Terrains order, which is value order, so a swatch
+// sits at its own persisted number and the picture and the legend index the
+// same table. Every declared terrain is listed including the two inland-water
+// values DESIGN.md 17.1 produces nowhere, because a row reading zero is usually
+// the row somebody is trying to move off zero.
+//
+// It panics on a terrain with no color, which is a table error rather than a
+// caller error: both tables are package data, the check runs once at
+// construction, and the alternative is a window with a transparent hole in it
+// that nobody notices until it is in a bug report.
+func terrainKey() Key {
+	k := Key{Kind: KeyTerrain}
+	for _, t := range wgva.Terrains() {
+		c, ok := terrainColors[t]
+		if !ok {
+			panic(fmt.Sprintf("render: %v has no color", t))
+		}
+		k.Swatches = append(k.Swatches, Swatch{Label: t.String(), Color: c})
+	}
+	return k
 }

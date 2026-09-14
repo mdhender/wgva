@@ -5,6 +5,8 @@ package render
 import (
 	"image/color"
 	"math"
+
+	"github.com/mdhender/wgva"
 )
 
 // RampStop is one anchor of a diagnostic ramp: a position in [0, 1] and the
@@ -143,4 +145,135 @@ var MoistureRamp = Ramp{
 	{At: 0.50, Color: color.RGBA{R: 0xef, G: 0xec, B: 0xe0, A: 0xff}},
 	{At: 0.75, Color: color.RGBA{R: 0x5a, G: 0x9e, B: 0x86, A: 0xff}},
 	{At: 1.00, Color: color.RGBA{R: 0x10, G: 0x3f, B: 0x45, A: 0xff}},
+}
+
+// BasinRamp is the diagnostic ramp for the basin composite of DESIGN.md 17,
+// which runs -1 a rise that sheds water to +1 a closed hollow.
+//
+// It is diverging about zero because the quantity is signed and the interesting
+// contour is where it changes sign: a basin map is read for where the hollows
+// are, and a sequential ramp would draw the neutral two thirds of the world as
+// a gradient and leave the boundary nowhere in particular.
+//
+// The high end is the wet end, which is the convention the moisture ramp
+// already establishes, and the low end is the bare dome of a rise.
+var BasinRamp = Ramp{
+	{At: 0.00, Color: color.RGBA{R: 0xb0, G: 0x8e, B: 0x54, A: 0xff}},
+	{At: 0.35, Color: color.RGBA{R: 0xd8, G: 0xcd, B: 0xb4, A: 0xff}},
+	{At: 0.50, Color: color.RGBA{R: 0xef, G: 0xec, B: 0xe4, A: 0xff}},
+	{At: 0.70, Color: color.RGBA{R: 0x69, G: 0x8f, B: 0xa8, A: 0xff}},
+	{At: 1.00, Color: color.RGBA{R: 0x14, G: 0x33, B: 0x52, A: 0xff}},
+}
+
+// VolcanicRamp is the diagnostic ramp for the volcanic tendency, which runs -1
+// to +1.
+//
+// It is nearly flat over most of its range and rises sharply at the top, which
+// is deliberate and is the one ramp in this file that is not chosen for
+// legibility across the whole scale. The tendency is a field everywhere and
+// terrain reads only its top few percent, so what somebody drawing this window
+// wants to see is where the provinces are — and a ramp that spent half its
+// contrast on the difference between -0.8 and -0.2 would draw that in a color
+// nobody can pick out.
+var VolcanicRamp = Ramp{
+	{At: 0.00, Color: color.RGBA{R: 0x1a, G: 0x1a, B: 0x1e, A: 0xff}},
+	{At: 0.55, Color: color.RGBA{R: 0x3a, G: 0x36, B: 0x38, A: 0xff}},
+	{At: 0.78, Color: color.RGBA{R: 0x7a, G: 0x4a, B: 0x30, A: 0xff}},
+	{At: 0.90, Color: color.RGBA{R: 0xc4, G: 0x5c, B: 0x22, A: 0xff}},
+	{At: 1.00, Color: color.RGBA{R: 0xff, G: 0xd2, B: 0x6a, A: 0xff}},
+}
+
+// terrainColors is the color each terrain is painted, by value.
+//
+// These are conventions rather than data — the classification is what a game
+// reads and a color is not a threshold — but a legend that disagreed with every
+// atlas ever printed would be read wrong, so water is blue, forest is green,
+// desert is sand, and ice is white. Within a family the variants differ in
+// lightness rather than in hue, so that "which family is this" survives being
+// looked at on a bad monitor and "which variant" is available to anyone
+// looking closely.
+//
+// The two inland-water entries are here even though DESIGN.md 17.1 produces
+// neither, because the legend lists every declared terrain: a row reading zero
+// is usually the row somebody is trying to move off zero, and a swatch table
+// with a hole in it would index wrong besides.
+var terrainColors = map[wgva.Terrain]color.RGBA{
+	wgva.TerrainDeepOcean:    {R: 0x04, G: 0x14, B: 0x2b, A: 0xff},
+	wgva.TerrainOcean:        {R: 0x0d, G: 0x3a, B: 0x6b, A: 0xff},
+	wgva.TerrainShallowSea:   {R: 0x2f, G: 0x7f, B: 0xb5, A: 0xff},
+	wgva.TerrainCoastalWater: {R: 0x74, G: 0xb3, B: 0xd4, A: 0xff},
+
+	wgva.TerrainInlandSea: {R: 0x1f, G: 0x5e, B: 0x8c, A: 0xff},
+	wgva.TerrainLake:      {R: 0x3d, G: 0x86, B: 0xb8, A: 0xff},
+
+	wgva.TerrainGlacialIce: {R: 0xee, G: 0xf4, B: 0xf8, A: 0xff},
+	wgva.TerrainTundra:     {R: 0x9a, G: 0xa7, B: 0x9a, A: 0xff},
+
+	wgva.TerrainMarsh: {R: 0x5d, G: 0x7a, B: 0x52, A: 0xff},
+	wgva.TerrainSwamp: {R: 0x3f, G: 0x5c, B: 0x3a, A: 0xff},
+	wgva.TerrainBog:   {R: 0x6b, G: 0x6f, B: 0x4e, A: 0xff},
+
+	wgva.TerrainDesert:    {R: 0xd9, G: 0xc0, B: 0x7a, A: 0xff},
+	wgva.TerrainBadlands:  {R: 0xb0, G: 0x7a, B: 0x4e, A: 0xff},
+	wgva.TerrainScrubland: {R: 0xa8, G: 0x9a, B: 0x5e, A: 0xff},
+
+	wgva.TerrainPlains:    {R: 0xa7, G: 0xbd, B: 0x72, A: 0xff},
+	wgva.TerrainGrassland: {R: 0x8f, G: 0xb4, B: 0x5c, A: 0xff},
+	wgva.TerrainSteppe:    {R: 0xb9, G: 0xb0, B: 0x71, A: 0xff},
+	wgva.TerrainSavanna:   {R: 0xc9, G: 0xb4, B: 0x5a, A: 0xff},
+
+	wgva.TerrainBorealForest:    {R: 0x2f, G: 0x57, B: 0x41, A: 0xff},
+	wgva.TerrainTemperateForest: {R: 0x3f, G: 0x7a, B: 0x3a, A: 0xff},
+	wgva.TerrainRainforest:      {R: 0x1f, G: 0x5a, B: 0x2c, A: 0xff},
+
+	wgva.TerrainHills:    {R: 0x8a, G: 0x82, B: 0x57, A: 0xff},
+	wgva.TerrainMountain: {R: 0x8a, G: 0x8a, B: 0x8a, A: 0xff},
+	wgva.TerrainAlpine:   {R: 0xc7, G: 0xcc, B: 0xd1, A: 0xff},
+
+	wgva.TerrainVolcano:          {R: 0x7a, G: 0x2a, B: 0x24, A: 0xff},
+	wgva.TerrainVolcanicHighland: {R: 0x5c, G: 0x40, B: 0x38, A: 0xff},
+
+	wgva.TerrainCoast: {R: 0xd8, G: 0xcf, B: 0xa5, A: 0xff},
+}
+
+// climateColors is the color each cell of the two-axis band table is painted,
+// as five rows of five: polar to hot down, arid to saturated across.
+//
+// It is one table rather than two ramps multiplied together, and that is the
+// point of drawing climate at all. The two axes are independent, so a cell is
+// not a blend of a temperature color and a rainfall color — a polar desert and
+// a polar rainforest are both ordinary places and a multiplied palette would
+// make them two shades of the same thing.
+//
+// Read across for moisture: pale and dry on the left, deep and wet on the
+// right. Read down for heat: the blues of a polar row, through the greens of
+// the temperate rows, to the ochres of a hot one. The two directions use
+// different properties — lightness across, hue down — so that a reader can tell
+// which axis a difference is on.
+var climateColors = [5][5]color.RGBA{
+	{ // polar
+		{R: 0xc9, G: 0xd4, B: 0xe0, A: 0xff}, {R: 0xb3, G: 0xc4, B: 0xd8, A: 0xff},
+		{R: 0x9a, G: 0xb2, B: 0xcd, A: 0xff}, {R: 0x7e, G: 0x9c, B: 0xc0, A: 0xff},
+		{R: 0x62, G: 0x88, B: 0xb4, A: 0xff},
+	},
+	{ // cold
+		{R: 0xcb, G: 0xd3, B: 0xc9, A: 0xff}, {R: 0xae, G: 0xc3, B: 0xb6, A: 0xff},
+		{R: 0x8f, G: 0xb2, B: 0xa2, A: 0xff}, {R: 0x6f, G: 0xa0, B: 0x8e, A: 0xff},
+		{R: 0x4f, G: 0x8e, B: 0x7b, A: 0xff},
+	},
+	{ // temperate
+		{R: 0xde, G: 0xd9, B: 0xb4, A: 0xff}, {R: 0xc8, G: 0xcf, B: 0x93, A: 0xff},
+		{R: 0xa9, G: 0xc1, B: 0x76, A: 0xff}, {R: 0x83, G: 0xb2, B: 0x5c, A: 0xff},
+		{R: 0x5d, G: 0xa2, B: 0x44, A: 0xff},
+	},
+	{ // warm
+		{R: 0xe6, G: 0xcf, B: 0x94, A: 0xff}, {R: 0xd6, G: 0xc4, B: 0x73, A: 0xff},
+		{R: 0xbd, G: 0xb9, B: 0x5a, A: 0xff}, {R: 0x94, G: 0xad, B: 0x4d, A: 0xff},
+		{R: 0x6a, G: 0x9f, B: 0x40, A: 0xff},
+	},
+	{ // hot
+		{R: 0xe8, G: 0xbb, B: 0x6e, A: 0xff}, {R: 0xdb, G: 0xa8, B: 0x5a, A: 0xff},
+		{R: 0xc7, G: 0x9a, B: 0x4c, A: 0xff}, {R: 0x8f, G: 0x9c, B: 0x3c, A: 0xff},
+		{R: 0x4f, G: 0x8f, B: 0x33, A: 0xff},
+	},
 }

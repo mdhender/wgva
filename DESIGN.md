@@ -4080,3 +4080,171 @@ asserts that every band is reachable and none swallows the world, which is a
 test of the thresholds rather than of the tuning.
 
 *Phase 5.*
+
+### D.14 The basin composite and the terrain classifier, written out
+
+Section 17 gives terrain as a function of eight things and orders the rules it
+is decided by. It does not say how basin influence is composed, how strongly
+the product with moisture bites, what the volcanic tendency is made of, or
+where any of the rules are cut. This is what phase 6 settled.
+
+**The basin composite** is the shape the two composites above it already use —
+a weighted average, so the result is in `[-1, +1]` whatever the weights are:
+
+```text
+basin = (wB*broad + wR*regional + wL*local + wBias*regionBasinBias)
+        / (wB + wR + wL + wBias)
+```
+
+Three scales under three hashing domains, blended with the region's basin bias.
+Positive is a closed hollow and negative is a rise. There is no contrast pass,
+and its absence is a decision rather than an omission: the two composites above
+use one to spread a field that would otherwise sit in its middle band, and this
+one is never cut into bands at all. It is a multiplier, and a multiplier pushed
+toward its ends is a world where every tile is either a sump or a dome.
+
+**The product** is the whole of section 17.1's geography:
+
+```text
+wetness = clamp(moisture + basinMoistureWeight * basin * moisture)
+```
+
+A sum would make every basin wet, which would put a marsh in the middle of a
+desert wherever the basin field happened to be high. The product scales the
+moisture that is already there, and the signed scalar is what makes that work:
+moisture runs `-1` arid to `+1` saturated with zero the middle of the moderate
+band, so multiplying by something above one moves a value away from the middle
+in whichever direction it already lay. Dry endorheic regions arrive as a
+consequence of the composition rather than as a special case.
+
+`Basin.MoistureWeight` is bounded above by one, and that is not a round number:
+`basin` reaches `-1`, so at a weight of one a rise erases the climate's moisture
+entirely and past it the product changes sign. A rise that made a dry place wet
+would be the composition running backwards. Zero is the other end and is
+legitimate — terrain then reads the climate's moisture unchanged, which is what
+a bisecting tuner sets it to.
+
+**The volcanic tendency** is the same weighted average over one field and the
+region's bias. What makes a volcano rare is not this and not a draw: it is three
+conditions on three continuous fields — the tendency, the uplift under it, and
+concentrated relief — which is the distinction section 33.1 draws between a
+classification and a per-tile random selection. The field's wavelength is the
+span of a province rather than of a cone, because a field fine enough to place
+individual peaks would be that forbidden per-tile selection arrived at by way of
+a wavelength.
+
+**Wetness is not the tile's reported moisture.** `Tile.MoistureValue` is the
+climate's, and terrain is classified from the wetness above it. A tile that
+reported the wetness would be reporting a value its climate model never
+produced, and every distribution measurement that reads the field would be
+measuring something else.
+
+**The classifier** runs section 17's order with three placements worth writing
+down, since each could have gone another way:
+
+- **Hills sit with the mountains rather than in the climate cover.** What makes
+  a tile hills is its elevation and its slope, and a rule that let the cover
+  claim it first would mean the elevated family only existed above the mountain
+  threshold.
+- **Badlands are lifted out of the cover rather than given a rule.** The dry
+  family's evidence in section 17 is "low moisture, heat, exposed relief", so
+  the table places the desert and one comparison on relief lifts the steep part
+  of it out. Doing it where the thing it is an exception to is written down is
+  what keeps the two from drifting apart.
+- **The cover is a table and not a ladder of comparisons.** The axes are
+  independent, so what grows somewhere is a function of the pair and not of
+  either alone; a rule that read them in sequence would have to decide which of
+  them outranked the other, and a polar desert and a polar rainforest are both
+  ordinary places.
+
+**The rim rule is written and nothing sets its input.** The order is what this
+phase settles; the profile, the flag, and the forced band are phase 7's.
+
+**One departure from section 29 is recorded here rather than fixed.** That
+section costs the `climate` layer at seven evaluations a tile, on the grounds
+that it reads the six neighboring elevations. It does not: the climate composite
+reads the elevation scalar at its own tile and nothing around it, so the layer
+costs one. Only `relief` and `terrain` read neighbors. Costing climate at seven
+would over-charge every budget by a factor of seven for work nobody does, and a
+budget that refuses affordable windows is a budget people raise until it stops
+meaning anything.
+
+*Phase 6.*
+
+### D.15 What the terrain defaults were tuned to
+
+Appendix D.11 and D.13 for the terrain vocabulary. Over 20,000 coordinates at
+each of four seeds, under the shipped defaults, as a fraction of the world and
+of its land:
+
+| terrain | of the world | of the land |
+|---|---:|---:|
+| deep ocean | 0.314 | |
+| ocean | 0.283 | |
+| shallow sea | 0.068 | |
+| coastal water | 0.020 | |
+| inland sea | 0.000 | |
+| lake | 0.000 | |
+| glacial ice | 0.018 | 0.058 |
+| tundra | 0.024 | 0.075 |
+| marsh | 0.0023 | 0.007 |
+| swamp | 0.0012 | 0.004 |
+| bog | 0.0015 | 0.005 |
+| desert | 0.005 | 0.015 |
+| badlands | 0.0018 | 0.006 |
+| scrubland | 0.028 | 0.088 |
+| plains | 0.022 | 0.071 |
+| grassland | 0.024 | 0.076 |
+| steppe | 0.016 | 0.050 |
+| savanna | 0.018 | 0.058 |
+| boreal forest | 0.017 | 0.054 |
+| temperate forest | 0.029 | 0.091 |
+| rainforest | 0.003 | 0.011 |
+| hills | 0.081 | 0.258 |
+| mountain | 0.005 | 0.015 |
+| alpine | 0.004 | 0.014 |
+| volcano | 0.0003 | 0.0008 |
+| volcanic highland | 0.002 | 0.007 |
+| coast | 0.012 | 0.038 |
+
+| | |
+|---|---:|
+| land fraction, measured through terrain | 0.316 |
+| neighboring tiles sharing a terrain | 0.897 |
+| land whose terrain the basin product moved | 0.037 |
+
+Five of those are the phase's rules and its exit condition, measured:
+
+- **The two inland-water rows are zero, and that is an assertion rather than an
+  observation.** Section 17.1 omits inland water, and the distribution test
+  requires these two to be produced nowhere while requiring every other terrain
+  to be produced somewhere. The day somebody implements a lake, that test is
+  what says so.
+- **Neighboring tiles share a terrain 0.897 of the time.** Independent per-tile
+  selection over the twenty-five reachable terrains would manage about 0.04, so
+  this is section 33.1 measured rather than asserted: terrain is downstream of
+  geography. The test bounds it loosely, because what it is testing is that
+  terrain is a classification at all and not how smooth the geography is.
+- **The land fraction measured through terrain is 0.316**, which is the same
+  rule read the other way round from D.11's and the third section 4.2 reasons
+  about when it settles the world radius. The two paths agreeing is what the
+  water terrains and the water elevation bands are pinned against.
+- **The basin product moves the terrain of about four percent of land.** That is
+  the number the moisture weight was tuned to: below a percent the basin fields
+  are geography nothing consumes, and much above ten the wetness stops being the
+  climate's and starts being the basin's.
+- **A volcano is about one land tile in twelve hundred.** Three conditions on
+  three continuous fields is what produces that, and it is why the distribution
+  test samples four seeds: a single twenty-thousand coordinate sample would find
+  a handful, and a handful is close enough to none that the test would be
+  reporting the seed rather than the thresholds.
+
+Hills at a quarter of all land is the row most likely to want moving, and it is
+the one to move by raising `Terrain.HillsRelief`: the highland band is hills
+whatever its relief, so the threshold is what decides how much of the ordinary
+ground below it the elevated family claims before the climate cover sees it. As
+in D.11 and D.13 the distribution test bounds all of this loosely on purpose —
+every terrain reachable, none swallowing the world — which is a test of the
+thresholds rather than of the tuning.
+
+*Phase 6.*

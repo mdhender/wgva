@@ -289,7 +289,7 @@ func Render(g *wgva.Generator, v Viewport, l Layer, hexRadius int) (*image.RGBA,
 					))
 					c := Background
 					if oc.Col >= 0 && oc.Col < v.Cols && oc.Row >= 0 && oc.Row < v.Rows {
-						c = key.Ramp.At(normalize(key, values[oc.Row*v.Cols+oc.Col]))
+						c = colorOf(key, values[oc.Row*v.Cols+oc.Col])
 					}
 					img.SetRGBA(x, y, c)
 				}
@@ -363,7 +363,7 @@ func RenderGrid(g *wgva.Generator, v Viewport, l Layer, pixelsPerCell int) (*ima
 		wg.Go(func() {
 			for row := w; row < v.Rows; row += workers {
 				for col := range v.Cols {
-					c := key.Ramp.At(normalize(key, values[row*v.Cols+col]))
+					c := colorOf(key, values[row*v.Cols+col])
 					for dy := range pixelsPerCell {
 						for dx := range pixelsPerCell {
 							img.SetRGBA(col*pixelsPerCell+dx, row*pixelsPerCell+dy, c)

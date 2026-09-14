@@ -85,10 +85,15 @@ func nudge(t *testing.T, f config.Field, cfg *wgva.Config) string {
 	var candidates []string
 	switch f.Kind {
 	case config.ValueScalar:
-		// The last three are for the thresholds that are not free over the
-		// positives: a band ladder entry has the entry below it as a floor, and
-		// the deep-water threshold lies under sea level and so is negative.
-		candidates = []string{"0.375", "0.5", "1.5", "2.5", "13", "700", "0.625", "0.875", "-0.25"}
+		// The last five are for the thresholds that are not free over the
+		// positives: a band ladder entry has the entry below it as a floor, the
+		// deep-water threshold lies under sea level and so is negative, and the
+		// terrain rules of DESIGN.md 17 cut two heat ladders whose lower entry
+		// has the upper one as a ceiling.
+		candidates = []string{
+			"0.375", "0.5", "1.5", "2.5", "13", "700",
+			"0.625", "0.875", "-0.25", "-0.5", "-0.75",
+		}
 	case config.ValueCount:
 		candidates = []string{"1", "2", "3", "5", "7", "11", "64", "256", "1024", "2048"}
 	case config.ValueChoice:

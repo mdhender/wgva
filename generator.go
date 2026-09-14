@@ -36,6 +36,18 @@ type Generator struct {
 	heat              Field
 	moisture          Field
 	moistureVariation Field
+
+	// The three scales of basin influence of DESIGN.md 17, coarse to fine, and
+	// the volcanic tendency. Each has its own hashing domain, for the reason
+	// the climate fields do.
+	//
+	// Nothing above elevation or climate reads any of them. They are here
+	// because terrain reads all four, and terrain is the one classification
+	// that reads every field in the module at once.
+	basinBroad    Field
+	basinRegional Field
+	basinLocal    Field
+	volcanic      Field
 }
 
 // New returns a generator for the seed and configuration, or the first reason
@@ -60,7 +72,14 @@ func New(seed Seed, cfg Config) (*Generator, error) {
 	g.heat = DeriveHeatField(seed, cfg)
 	g.moisture = DeriveMoistureField(seed, cfg)
 	g.moistureVariation = DeriveMoistureVariationField(seed, cfg)
-	for _, f := range []*Field{&g.ridge, &g.heat, &g.moisture, &g.moistureVariation} {
+	g.basinBroad = DeriveBasinBroadField(seed, cfg)
+	g.basinRegional = DeriveBasinRegionalField(seed, cfg)
+	g.basinLocal = DeriveBasinLocalField(seed, cfg)
+	g.volcanic = DeriveVolcanicField(seed, cfg)
+	for _, f := range []*Field{
+		&g.ridge, &g.heat, &g.moisture, &g.moistureVariation,
+		&g.basinBroad, &g.basinRegional, &g.basinLocal, &g.volcanic,
+	} {
 		if err := f.Validate(); err != nil {
 			return nil, err
 		}
@@ -177,6 +196,20 @@ type Sample struct {
 	// Climate is the two-axis classification of those scalars.
 	Climate Climate
 
+	// BasinInfluence is the blended basin composite of DESIGN.md 17: -1 a rise
+	// that sheds water, 0 neutral ground, +1 a closed hollow.
+	//
+	// It is reported here and it is not in a Tile, which is the shape rather
+	// than an omission. A tile carries what a game reads, and what a game reads
+	// of a basin is the terrain the basin produced; this is the quantity behind
+	// it, for the layer that draws basin geography and for the coordinate
+	// somebody is inspecting because that terrain looked wrong.
+	BasinInfluence float64
+
+	// Volcanic is the volcanic tendency, in [-1, +1]. Like BasinInfluence it is
+	// a field terrain reads rather than a value a tile carries.
+	Volcanic float64
+
 	// RimDistance is hexes from the outer edge of the map. See DESIGN.md 15.1.
 	RimDistance int64
 }
@@ -194,6 +227,7 @@ func (g *Generator) Sample(c Coord) Sample {
 	// That is the distinction render.Layer.Cost is built on. DESIGN.md 4.3.
 	parts := g.elevationAt(c)
 	climate := g.climateAt(parts.pos, parts.region, parts.elevation)
+	basin := g.basinAt(parts.pos, parts.region)
 
 	return Sample{
 		Coord:           c,
@@ -210,6 +244,8 @@ func (g *Generator) Sample(c Coord) Sample {
 		Heat:            climate.heat,
 		Moisture:        climate.moisture,
 		Climate:         g.cfg.Climate.classify(climate),
+		BasinInfluence:  basin.basin,
+		Volcanic:        g.volcanicAt(parts.pos, parts.region),
 		RimDistance:     c.RimDistance(),
 	}
 }
