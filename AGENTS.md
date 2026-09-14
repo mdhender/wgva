@@ -302,16 +302,22 @@ These are the rules most likely to be violated by code that looks correct.
   refuses an absent or empty file rather than initializing it. `wgva-map --db`
   reads a world's *identity* — seed, version, width, configuration — and
   regenerates; it does not read stored tiles, because there are none.
-- **A seed does not name a world; a seed plus a configuration fingerprint does.**
-  `wgva-world create` requires `--expect <fingerprint>` and refuses a mismatch;
-  there is no `--force`. Two ways the same seed yields two worlds, both silent
-  without the check: the sampling and creating binaries are different builds
-  whose defaults moved, or somebody nudged a setting in the tuning form. The
-  build version catches the first and not the second, which is why the enforced
-  value is the fingerprint. Nobody types one — the tuning tool emits the whole
-  `wgva-world create` line, and `wgva-world fingerprint` answers it without a
-  browser. Quote the version to humans, compare the fingerprint in code. See
-  `DESIGN.md` 29.5.
+- **A seed does not name a world.** `wgva-world create` requires
+  `--expect <build>/<fingerprint>` and refuses a mismatch in either half; there
+  is no `--force`. Three ways the same seed yields two worlds, all silent without
+  the check, and no single value catches all three: a different build whose
+  defaults moved (either half catches it), a setting nudged in the tuning form
+  (only the fingerprint), and a generator fix shipped without an
+  `AlgorithmVersion` bump (only the build identity). Nobody types the pair — the
+  tuning tool emits the whole `wgva-world create` line, and `wgva-world identity`
+  answers it without a browser. Quote the version to humans; compare the pair in
+  code. See `DESIGN.md` 29.5.
+- **The fingerprint hashes what was declared, not what was run.** It covers the
+  algorithm version, component width, and configuration — never the generator's
+  code. Do not "fix" that by folding the build into it: gate 6 compares it when a
+  world is *reopened*, and a build-dependent fingerprint would refuse every
+  existing world on every patch release. The build identity is stored as world
+  provenance instead, and no gate compares it.
 - **The administrator never supplies a configuration.** The only way one reaches
   a running binary is a developer making it the built-in defaults and committing
   it. `wgva-world create --config` is a developer affordance for exercising the

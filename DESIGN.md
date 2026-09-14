@@ -1576,6 +1576,21 @@ fingerprint = SHA-256( algorithmVersion LE bytes || componentWidthBits LE bytes 
 
 The component width is in the fingerprint because it is part of world topology (section 4.2), and a world file that says `int16` must never validate against a binary built at `int32`.
 
+> **The fingerprint hashes what was *declared*, not what was *run*.** Every input
+> above is a number somebody wrote down; none of them is the generator's code.
+> So a build that changes a noise formula, a hard-coded threshold, or a
+> classification rule **without bumping `AlgorithmVersion` produces a different
+> world under an identical fingerprint**, and nothing here can tell. That gap is
+> closed by discipline rather than by construction, and section 27 is where the
+> discipline lives.
+>
+> Do not close it by folding the build version into this hash. This value's job
+> is world identity and cache validity: gate 6 of section 27.5 compares it when a
+> world is *reopened*, and a build-dependent fingerprint would refuse every
+> existing world on every patch release. What needs the build identity is the
+> *creation* guard, which is a different question asked at a different moment;
+> section 29.5 carries it separately.
+
 Rules:
 
 - Serialize to **CBOR**, not JSON. JSON invites whitespace, float-formatting, and
@@ -1856,7 +1871,17 @@ algorithm version
 component width in bits
 complete effective generator configuration
 configuration fingerprint
+creating build identity          (provenance only)
 ```
+
+The last line is the version string of the binary that created the world,
+including the commit hash and dirty marker that `semver.Commit` supplies. It is
+**provenance, not identity**: it is deliberately excluded from the fingerprint
+and no gate in section 27.5 compares it, because a world reopened by a later
+build must still open. It is recorded because "which build made this?" is the
+first question anybody asks about a world that looks wrong, and because
+`AlgorithmVersion` — the field that is supposed to answer it — is a number
+somebody has to remember to change.
 
 Changing noise formulas, thresholds, or hash domains changes existing worlds. Treat such changes as generation-version changes unless compatibility is intentionally preserved.
 
@@ -2165,15 +2190,15 @@ a query string.
 
 What it gives up is real and is named on every page: a link to a window shows what that process is drawing *now*, not what it drew when the link was copied. What it keeps is the fingerprint. Every tab prints it, the download turns the configuration behind it back into a file, and `wgva-map --config` draws that file — so a picture can always be traced to the configuration that produced it and reproduced outside the tool.
 
-**Print the algorithm version beside the fingerprint, and label the
+**Print the build identity beside the fingerprint, and label the
 configuration.** Section 21.2 makes the default configuration's fingerprint a
 written-down constant, so the tool knows that value and can say which side of it
 the session is on: every tab labels the configuration as **this binary's
-defaults** or as **modified**, conspicuously, beside the fingerprint and the
-version. The label tells a reader whether anyone has touched the form; the
-fingerprint and version together tell them *which build they are looking at*,
-which is the half that matters to somebody sampling seeds to create a world
-from. Section 29.5 is why.
+defaults** or as **modified**, conspicuously, beside the identity pair. That
+pair is what `wgva-world create --expect` takes, and neither half of it is
+redundant — the fingerprint cannot see a generator fix nobody versioned, and the
+build identity cannot see a setting nudged in this process. Section 29.5 works
+it through.
 
 #### The grid
 
@@ -2393,56 +2418,93 @@ binary. During alpha the defaults move whenever tuning improves — that is what
 step 3 is — so a seed chosen on Tuesday's build and created on Thursday's is a
 different world at the same number.
 
-**Nothing errors**, which is what makes it worth a paragraph rather than a
-sentence: the seed is valid, the configuration is valid, every gate in section
-27.5 passes, and the world is perfectly reproducible. It is simply not the one
-that was chosen, and the only evidence is that the map looks different from the
-one in the browser tab — which by then is closed.
+The third hazard is the second one with the evidence removed. A build may fix a
+bug in a noise formula, move a threshold that lives in code rather than
+configuration, or change a classification rule — and **if nobody bumped
+`AlgorithmVersion`, the configuration fingerprint is byte-identical across that
+change**, because the fingerprint hashes what was declared and not what was run
+(section 21.2). `AGENTS.md`, *Alpha workflow*, says plainly that
+`AlgorithmVersion` gets no ceremony during alpha, which is exactly the period
+when generator code churns fastest. So this is the ordinary case, not the
+exotic one.
+
+**Nothing errors** in any of the three, which is what makes them worth
+paragraphs rather than a sentence: the seed is valid, the configuration is
+valid, every gate in section 27.5 passes, and the world is perfectly
+reproducible. It is simply not the one that was chosen, and the only evidence is
+that the map looks different from the one in the browser tab — which by then is
+closed.
 
 **So the check is enforced, not printed.** `wgva-world create` requires
-`--expect <fingerprint>` and refuses a mismatch, naming both values. A silently
-different world becomes a message.
+`--expect`, carrying the build identity and the configuration fingerprint
+together, and refuses a mismatch in either. A silently different world becomes a
+message. Why it takes two values and not one is below.
 
 Nobody types a fingerprint, and nothing about this asks them to. The tuning tool
 emits the whole command line on the page for the window being viewed:
 
 ```text
-wgva-world create --seed 0123456789abcdef --expect 3f2a9c1e88b04d7a world.wgva
+wgva-world create --seed 0123456789abcdef \
+    --expect v0.9.0-alpha+3fa71c2/8b04d7a13f2a9c1e world.wgva
 ```
 
 Copy one line, paste it, and the comparison happens without a person performing
 it. (Emitting that text is not an import: `cmd/wgva-tune` still has no path to
 `store`, and a command line is a string.)
 
-#### Why the enforced value is the fingerprint and the quoted value is the version
+#### `--expect` carries the build identity *and* the fingerprint
 
-The build version looks like it would do just as well here, and for an
-administrator running a released binary she has not touched, it would: our own
-rule makes a released build's version determine its defaults, because moving a
-default is a code change that bumps, and section 21.2's written-down constant
-fails the build until somebody does. **For that case the two are the same
-fact**, and she should read, quote, and file bug reports against the *version*,
-because `v0.4.0-alpha` is a thing a person can say out loud and
-`3f2a9c1e88b04d7a` is not.
+Neither value alone is sufficient, and the reason is worth working through
+because each looks sufficient on its own.
 
-They come apart in three places, and the first is hers:
+The **fingerprint** hashes what was declared — algorithm version, component
+width, configuration (section 21.2). It does not hash the generator's code. So a
+build that fixes a bug in a noise formula, moves a hard-coded threshold, or
+changes a classification rule, and whose author did not bump `AlgorithmVersion`,
+produces a **different world under an identical fingerprint**. This is not a
+hypothetical: `AGENTS.md`, *Alpha workflow*, says outright that
+`AlgorithmVersion` gets no ceremony during alpha, which is exactly the period
+when generator code churns fastest. During alpha the fingerprint is reliably
+behind the code.
 
-- **She changed a setting, probably by accident.** Same binary, same version
-  string, different configuration, different world. A version comparison passes
-  and creates the wrong world; the fingerprint refuses. This is the case that
-  settles it: the value that must be enforced is the one that moves when the
-  world moves, and the version does not move here at all.
-- **The version is finer than the configuration.** Most bumps change no default,
-  so comparing versions would refuse worlds that are in fact identical. The
-  fingerprint changes when, and only when, the world would.
-- **The version is true by our observing a rule; the fingerprint is true by
-  construction.** They part company wherever the rule is not in force — a
-  developer's working tree, where an uncommitted change to the defaults produces
-  `0.4.0-alpha+abc1234-dirty` and two different dirty builds share that string.
-  The fingerprint does not lie there.
+The **build identity** — the version string with the commit hash and dirty
+marker that `semver.Commit` supplies — moves whenever the code moves, because it
+is derived from the repository rather than from somebody remembering. But it
+cannot see a configuration edited in a running process, because that
+configuration was never in any build.
 
-So: **the version is the name and the fingerprint is the proof.** Print both
-everywhere; quote the version; compare the fingerprint.
+The three failure cases, and which value catches each:
+
+| What went wrong between sampling and creating | Build identity | Fingerprint |
+|---|---|---|
+| Different build, defaults moved | catches | catches |
+| Same build, a setting nudged in the form | **misses** | catches |
+| Different build, generator code changed with no `AlgorithmVersion` bump | catches | **misses** |
+
+So `--expect` takes the pair, and a mismatch in either half is a refusal naming
+which half and both values:
+
+```text
+--expect v0.9.0-alpha+3fa71c2/8b04d7a13f2a9c1e
+```
+
+Two consequences worth stating, because each corrects something written earlier
+in this document's history:
+
+- **The false-alarm objection to comparing build identities does not apply
+  here.** Most bumps change no default, so a build comparison refuses worlds
+  that would have been identical — which is expensive for the *stored*
+  fingerprint's job, where gate 6 must let an unchanged world reopen under a
+  later binary, and nearly free for *this* job, where the remedy is to re-sample
+  a seed. Different question, different tolerance for over-refusing. Refusing to
+  create is cheap; refusing to open is not.
+- **A dirty build cannot honestly claim identity.** Two different uncommitted
+  trees both report `+<hash>-dirty`, so the comparison is not a proof there. It
+  is still run, and the message says so on both the pass and the refusal rather
+  than pretending. This affects developers only; an administrator never has one.
+
+Quote the **version** to humans — `v0.9.0-alpha` is a thing a person can say out
+loud and a fingerprint is not — and compare the whole pair in code.
 
 One thing this simplifies. The defaults-or-modified label of section 29.1 was
 carrying the accidental-edit case on its own, which meant it only worked if
@@ -2498,8 +2560,8 @@ reached by passing a database flag with a path that happens not to exist yet is
 exactly the typo-becomes-a-side-effect that the rest of section 27 refuses.
 
 ```sh
-wgva-world create --seed <hex> --expect <fingerprint> [--config file] world.wgva
-wgva-world fingerprint
+wgva-world create --seed <hex> --expect <build>/<fingerprint> [--config file] world.wgva
+wgva-world identity
 ```
 
 - `--seed` is sixteen hexadecimal digits, matching section 29.1's spelling
@@ -2512,18 +2574,20 @@ wgva-world fingerprint
   candidate configuration can be given a world before it is shipped — chiefly to
   exercise the gates of section 27.5 in a test. When given, the file's
   fingerprint is recomputed rather than trusted from its comment header.
-- `--expect` is **required** and takes the configuration fingerprint the caller
-  believes they are creating from. A mismatch is a refusal naming both values and
+- `--expect` is **required** and takes the build identity and configuration
+  fingerprint the caller believes they are creating from, separated by `/`. A
+  mismatch in either half is a refusal naming which half and both values, and
   writes nothing. There is no `--force` and no way to skip it: the whole hazard
   above is that the wrong world is created without anybody noticing, and an
   optional guard against an unnoticeable failure is not a guard.
-- `wgva-world fingerprint` prints this binary's version and the fingerprint of
-  its built-in defaults, so `--expect` is answerable without a browser — from a
-  script, a fresh checkout, or a machine with no tuning tool running. It is the
-  first of the inspection subcommands below and it exists because requiring a
-  flag without a way to answer it would be a trap of its own.
-- The version and fingerprint actually written are **printed** on success, with
-  or without `--config`.
+- `wgva-world identity` prints this binary's build identity and the fingerprint
+  of its built-in defaults, in exactly the form `--expect` takes, so the flag is
+  answerable without a browser — from a script, a fresh checkout, or a machine
+  with no tuning tool running. Requiring a flag with no way to answer it would be
+  a trap of its own.
+- The build identity and fingerprint actually written are **printed** on success,
+  with or without `--config`. The build identity is also stored in the world's
+  metadata as provenance (section 27), where no gate compares it.
 - The command **refuses an existing file**. There is no `--force`: removing a
   world is something a person does deliberately, with `rm`.
 - It takes no viewport, no layer, and no output image, and it *cannot* —
