@@ -544,3 +544,16 @@ func DeriveFields(seed Seed, cfg Config, s Scale) Field {
 	ladder, dom := cfg.ladderFor(s)
 	return warped(seed, cfg, fbmField(seed, dom, ladder))
 }
+
+// DeriveRidgeField returns the field tree the ridge structure term of
+// DESIGN.md 10 is folded from, derived from the seed and the configuration by a
+// pure function.
+//
+// It is the same shape as a continuous scale — the seed-derived offset above an
+// fbm ladder above a simplex leaf, under the shared domain warp — because the
+// thing that makes it a ridge is the fold and the directional blur above it,
+// not the field underneath. Its own hashing domain is what keeps its lattice
+// clear of the four scales'; see DESIGN.md 8.1.
+func DeriveRidgeField(seed Seed, cfg Config) Field {
+	return warped(seed, cfg, fbmField(seed, DomRidgeStructure, cfg.Elevation.Ridge))
+}

@@ -95,7 +95,14 @@ const NyquistWavelengthMiles = 4 * hexApothemMiles
 // forbids defaulting a missing generation-affecting field, so a world file
 // written under the older version genuinely cannot be reopened.
 type Config struct {
-	// SeaLevel is the normalized elevation at which land begins, in [0, 1].
+	// SeaLevel is where land begins, as a fraction of the elevation
+	// composite's range, in (0, 1). It is what decides the land fraction, and
+	// it is not a threshold on the elevation scalar: the scalar puts sea level
+	// at exactly zero whatever this is set to. See Config.seaLevelRescale.
+	//
+	// The interval is open because zero and one each make one side of that
+	// rescale a division by zero, and each names a world that is entirely one
+	// thing with no scale left to measure it against.
 	SeaLevel float64
 
 	// The four continuous scales of DESIGN.md 10, coarse to fine. Each is the
@@ -119,6 +126,11 @@ type Config struct {
 	Warp              LadderConfig
 	WarpStrengthMiles float64
 
+	// Elevation is everything the composite of DESIGN.md 10 is made of: what
+	// each continuous scale is worth, how hard the coast is sharpened, what a
+	// region's biases buy, the ridge structure, and where the bands fall.
+	Elevation ElevationConfig
+
 	// The three levels of the addressing hierarchy, in hexes along either axial
 	// basis direction. They are addressing devices and must never be visible in
 	// the output.
@@ -129,6 +141,72 @@ type Config struct {
 	// Rim is the outer band of the map. See DESIGN.md 15.1.
 	Rim RimConfig
 }
+
+// ElevationConfig is what the elevation composite of DESIGN.md 10 weighs.
+//
+// The weights are relative and are normalized by their own total, so scaling
+// all four changes nothing and only their ratios are a decision. Everything
+// else here is either a normalized amount in [0, 1] or a threshold on the
+// elevation scalar, and none of it is derived from a generated sample: a
+// threshold taken from the minimum and maximum of a window would make the world
+// depend on what has been looked at. DESIGN.md 14 and 33.5.
+type ElevationConfig struct {
+	// What each continuous scale is worth in the composite. Coarse to fine, and
+	// descending, because a world whose detail outweighs its continents is
+	// noise with a coastline drawn on it.
+	ContinentalWeight float64
+	RegionalWeight    float64
+	LocalWeight       float64
+	DetailWeight      float64
+
+	// ContrastPasses is how many S-curve passes sharpen the coarse half before
+	// the rest of the composite is added. Zero is the identity and is a
+	// legitimate setting rather than a missing one. See contrast.
+	ContrastPasses uint8
+
+	// UpliftWeight is what a region's elevation bias is worth in elevation:
+	// regional uplift is this times the blended bias. The bias is normalized
+	// and this is the quantity, which is the division DESIGN.md 12 asks for.
+	UpliftWeight float64
+
+	// RoughnessInfluence is how far a region's roughness bias may exaggerate or
+	// subdue the fine half of the composite and the ridges. At zero every
+	// region has the same relief; at one a region can double it or flatten it.
+	RoughnessInfluence float64
+
+	// Ridge is the fbm ladder the ridge structure term is folded from. Its
+	// wavelength is the spacing of a mountain belt, not of a peak.
+	Ridge LadderConfig
+
+	// RidgeStrideMiles is how far the directional blur reaches along the
+	// region's ridge orientation. It is what turns an isotropic web of creases
+	// into belts that run with the region's grain, and zero leaves the web.
+	// See Generator.ridgeStructure.
+	RidgeStrideMiles float64
+
+	// RidgeWeight is what the ridge term is worth in the composite.
+	RidgeWeight float64
+
+	// RidgeOnset is how far above sea level the ridge term reaches full
+	// strength, as elevation. Below it the ridges are masked off, so a mountain
+	// belt does not surface as islands in open ocean, and the mask rises
+	// smoothly so the coast is not a wall.
+	RidgeOnset float64
+
+	// ReliefScale turns the mean elevation difference between neighboring tiles
+	// into the normalized relief value of DESIGN.md 18. It is dimensionless:
+	// relief per unit of elevation difference across one hex.
+	ReliefScale float64
+
+	// Bands are the thresholds that cut the scalar into the bands of
+	// DESIGN.md 14.1.
+	Bands ElevationBands
+}
+
+// MaxContrastPasses bounds the contrast ladder. It is a sanity bound rather
+// than a tuning one: past a few passes the composite is a two-valued mask and
+// what a fifth pass does is not a thing anybody is choosing.
+const MaxContrastPasses uint8 = 4
 
 // LadderConfig is one fbm ladder: where it starts, how many octaves it runs,
 // and how the wavelength and the amplitude change between them.
@@ -181,7 +259,9 @@ func (c Config) ladderFor(s Scale) (LadderConfig, uint64) {
 // that test, and updating the constant is the compatibility decision.
 func DefaultConfig() Config {
 	return Config{
-		SeaLevel: 0.5,
+		// About a third of the world is land, which is the fraction DESIGN.md 4.2
+		// reasons about when it settles the radius.
+		SeaLevel: 0.62,
 
 		// 1,000 hexes down to about 62. Continents and their interiors.
 		Continental: LadderConfig{WavelengthMiles: 6000, Octaves: 5, Lacunarity: 2, Gain: 0.5},
@@ -195,6 +275,39 @@ func DefaultConfig() Config {
 		// A low-frequency warp, a fifth of its own wavelength in strength.
 		Warp:              LadderConfig{WavelengthMiles: 1800, Octaves: 3, Lacunarity: 2, Gain: 0.5},
 		WarpStrengthMiles: 360,
+
+		Elevation: ElevationConfig{
+			// Coarse to fine and descending steeply: the continental scale
+			// decides where the water is, the regional scale shapes the coast
+			// and the interior, and the two fine scales are texture on top of
+			// whatever those two settled.
+			ContinentalWeight: 1,
+			RegionalWeight:    0.3,
+			LocalWeight:       0.12,
+			DetailWeight:      0.04,
+
+			// One pass. A weighted sum of four fields is concentrated about its
+			// middle, and one S-curve is enough to make a coastline a line.
+			ContrastPasses: 1,
+
+			UpliftWeight:       0.25,
+			RoughnessInfluence: 0.5,
+
+			// 60 hexes down to about 8: the spacing of a belt, not of a peak.
+			Ridge:            LadderConfig{WavelengthMiles: 360, Octaves: 4, Lacunarity: 2, Gain: 0.5},
+			RidgeStrideMiles: 45,
+			RidgeWeight:      0.15,
+			RidgeOnset:       0.25,
+
+			ReliefScale: 18,
+
+			Bands: ElevationBands{
+				DeepWater: -0.15,
+				Upland:    0.25,
+				Highland:  0.5,
+				Mountain:  0.75,
+			},
+		},
 
 		MacroRegionSizeHexes: 512,
 		RegionSizeHexes:      128,
@@ -215,7 +328,7 @@ func DefaultConfig() Config {
 // thresholds outside their range, wavelengths the tile grid cannot carry, a
 // hierarchy whose levels do not ascend, and a rim wider than the map.
 func (c Config) Validate() error {
-	if err := checkUnit("SeaLevel", c.SeaLevel); err != nil {
+	if err := checkOpenUnit("SeaLevel", c.SeaLevel); err != nil {
 		return err
 	}
 
@@ -228,6 +341,7 @@ func (c Config) Validate() error {
 		{"Local", c.Local},
 		{"Detail", c.Detail},
 		{"Warp", c.Warp},
+		{"Elevation.Ridge", c.Elevation.Ridge},
 	} {
 		if err := f.ladder.validate(f.name); err != nil {
 			return err
@@ -277,7 +391,126 @@ func (c Config) Validate() error {
 		}
 	}
 
+	if err := c.Elevation.validate(); err != nil {
+		return err
+	}
+
 	return c.Rim.validate()
+}
+
+// validate reports the first reason the elevation configuration cannot be used.
+//
+// The ridge ladder is checked with the other ladders in Config.Validate, so
+// what is left here is the weights, the amounts, and the band ladder.
+func (ec ElevationConfig) validate() error {
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Elevation.ContinentalWeight", ec.ContinentalWeight},
+		{"Elevation.RegionalWeight", ec.RegionalWeight},
+		{"Elevation.LocalWeight", ec.LocalWeight},
+		{"Elevation.DetailWeight", ec.DetailWeight},
+	} {
+		if !isFinite(f.value) {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotFinite}
+		}
+		// Each weight is positive rather than merely non-negative. A weight of
+		// zero silences a whole scale, and a scale that contributes nothing is
+		// an octave ladder still being evaluated for every tile in the world;
+		// the setting that means it is the wavelength, not this.
+		if f.value <= 0 {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotPositive}
+		}
+	}
+
+	if ec.ContrastPasses > MaxContrastPasses {
+		return &ConfigError{
+			Field: "Elevation.ContrastPasses", Value: float64(ec.ContrastPasses),
+			Lo: 0, Hi: float64(MaxContrastPasses), Err: ErrPassCount,
+		}
+	}
+
+	for _, f := range []struct {
+		name  string
+		value float64
+	}{
+		{"Elevation.UpliftWeight", ec.UpliftWeight},
+		{"Elevation.RoughnessInfluence", ec.RoughnessInfluence},
+		{"Elevation.RidgeWeight", ec.RidgeWeight},
+	} {
+		if err := checkUnit(f.name, f.value); err != nil {
+			return err
+		}
+	}
+
+	// A stride of zero is the isotropic web, which is a legitimate setting
+	// rather than a missing one, so this is bounded below by zero rather than
+	// by positivity.
+	if !isFinite(ec.RidgeStrideMiles) {
+		return &ConfigError{Field: "Elevation.RidgeStrideMiles", Value: ec.RidgeStrideMiles, Err: ErrNotFinite}
+	}
+	if ec.RidgeStrideMiles < 0 {
+		return &ConfigError{Field: "Elevation.RidgeStrideMiles", Value: ec.RidgeStrideMiles, Err: ErrNotPositive}
+	}
+
+	// The onset is a divisor, so zero is refused rather than clamped.
+	if err := checkUnit("Elevation.RidgeOnset", ec.RidgeOnset); err != nil {
+		return err
+	}
+	if ec.RidgeOnset == 0 {
+		return &ConfigError{Field: "Elevation.RidgeOnset", Value: 0, Err: ErrNotPositive}
+	}
+
+	if !isFinite(ec.ReliefScale) {
+		return &ConfigError{Field: "Elevation.ReliefScale", Value: ec.ReliefScale, Err: ErrNotFinite}
+	}
+	if ec.ReliefScale <= 0 {
+		return &ConfigError{Field: "Elevation.ReliefScale", Value: ec.ReliefScale, Err: ErrNotPositive}
+	}
+
+	return ec.Bands.validate()
+}
+
+// validate reports the first reason the band ladder cannot be used.
+//
+// The deep-water threshold is strictly below sea level and the three land
+// thresholds strictly ascend above it. An out-of-order threshold is a band that
+// can never be reached, which is evaluable and wrong — the defect
+// ErrNotAscending exists for.
+func (b ElevationBands) validate() error {
+	if !isFinite(b.DeepWater) {
+		return &ConfigError{Field: "Elevation.Bands.DeepWater", Value: b.DeepWater, Err: ErrNotFinite}
+	}
+	if b.DeepWater < -1 || b.DeepWater >= 0 {
+		return &ConfigError{
+			Field: "Elevation.Bands.DeepWater", Value: b.DeepWater,
+			Lo: -1, Hi: 0, Err: ErrOutOfRange,
+		}
+	}
+
+	ladder := []struct {
+		name  string
+		value float64
+		below string
+		floor float64
+	}{
+		{"Elevation.Bands.Upland", b.Upland, "sea level", 0},
+		{"Elevation.Bands.Highland", b.Highland, "Elevation.Bands.Upland", b.Upland},
+		{"Elevation.Bands.Mountain", b.Mountain, "Elevation.Bands.Highland", b.Highland},
+	}
+	for _, f := range ladder {
+		if !isFinite(f.value) {
+			return &ConfigError{Field: f.name, Value: f.value, Err: ErrNotFinite}
+		}
+		if f.value > 1 {
+			return &ConfigError{Field: f.name, Value: f.value, Lo: 0, Hi: 1, Err: ErrOutOfRange}
+		}
+		if f.value <= f.floor {
+			return &ConfigError{Field: f.name, Value: f.value, Below: f.below, Err: ErrNotAscending}
+		}
+	}
+	return nil
 }
 
 // validate reports the first reason the ladder cannot be used, as a
@@ -325,6 +558,19 @@ func checkUnit(field string, v float64) error {
 		return &ConfigError{Field: field, Value: v, Err: ErrNotFinite}
 	}
 	if v < 0 || v > 1 {
+		return &ConfigError{Field: field, Value: v, Lo: 0, Hi: 1, Err: ErrOutOfRange}
+	}
+	return nil
+}
+
+// checkOpenUnit rejects a normalized value outside the open interval (0, 1).
+// It is for a value that divides something, where an endpoint is not a
+// degenerate setting but an unevaluable one.
+func checkOpenUnit(field string, v float64) error {
+	if err := checkUnit(field, v); err != nil {
+		return err
+	}
+	if v == 0 || v == 1 {
 		return &ConfigError{Field: field, Value: v, Lo: 0, Hi: 1, Err: ErrOutOfRange}
 	}
 	return nil

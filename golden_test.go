@@ -235,3 +235,103 @@ func TestGoldenRegion(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The elevation composite
+// ---------------------------------------------------------------------------
+
+// The third golden table: the elevation composite of DESIGN.md 10 at the same
+// coordinates, under the same seed and the same defaults.
+//
+// It is a separate table for the reason the region table is: each answers a
+// different question, and a golden table's whole signal is that a value moved.
+// Re-recording one to widen another would spend that signal on nothing.
+//
+// It earns its keep three times over. The composite is a dozen multiply-adds a
+// tile and every one of them is a place DESIGN.md 25.1 can be forgotten. The
+// ridge term folds three evaluations of its own field in a fixed order, and an
+// order that changed would be a different number on every tile with nothing
+// else to see. And relief is a seven-evaluation first difference, which is the
+// one value in the module whose correctness depends on neighbors being
+// enumerated the same way every time.
+//
+// The band is recorded beside the scalar deliberately: a threshold moved by a
+// hair moves no float in this table and moves a band, and the two failures
+// point at different commits.
+//
+// Recorded under AlgorithmVersion 3 at world radius 32767.
+
+// goldenElevationRow is one coordinate, the float64 bits of the four values the
+// composite is read through, and the band the scalar classifies to.
+type goldenElevationRow struct {
+	q, r      int64
+	raw       uint64
+	ridge     uint64
+	elevation uint64
+	relief    uint64
+	band      Elevation
+}
+
+// goldenElevationValues is one row per coordinate in goldenCoords, in that
+// order.
+var goldenElevationValues = []goldenElevationRow{
+	{0, 0, 0x3fc052cc757968ba, 0x3fd2ee9a8e1440c0, 0xbfc58e3b039ea18b, 0x3fe0b95e84b6136e, ElevationDeepWater},
+	{1, 0, 0x3fb58eba65c87b8c, 0x3fd1449125b350df, 0xbfca43213d71969c, 0x3fdbdfd4e39553ff, ElevationDeepWater},
+	{0, 1, 0x3fb12fe882f0306d, 0x3fd3b9d8649b2bd5, 0xbfcbf56148c2f806, 0x3fdd3f2f3e7f69d3, ElevationDeepWater},
+	{-1, 0, 0x3fc4305e5fe531c8, 0x3fce0acb33154e75, 0xbfc1b4a6b8af75f6, 0x3fde3970c162308b, ElevationShallowWater},
+	{0, -1, 0x3fc3482e89b0eceb, 0x3fcb47981f937e35, 0xbfc14b4b1b5fbd7d, 0x3fd86b9420742e0d, ElevationShallowWater},
+	{1, -1, 0x3fbd31ae7129b36b, 0x3fce1ecea3b2cba9, 0xbfc5d0a2f6ca75fc, 0x3fd967abdfe3e4b8, ElevationDeepWater},
+	{-1, 1, 0x3fb9a213947a052e, 0x3fd33f3ca03a48cc, 0xbfc85fc064958bd3, 0x3fe1cedb159dec1f, ElevationDeepWater},
+	{7, 11, 0xbfbf9e61d009db82, 0x3fc3fefca55c21e3, 0xbfda7980839e55ef, 0x3fbcc50df39f2624, ElevationDeepWater},
+	{-7, 11, 0xbfa673a37cfbac58, 0x3fd30894d30533da, 0xbfd4f548189a7e38, 0x3fd1d6e91251c47e, ElevationDeepWater},
+	{7, -11, 0x3fca786f1b2676c4, 0x3fdc629e6608bfb4, 0xbf8e55c2be2c3cdf, 0x3fd8e8fb9f913a5b, ElevationShallowWater},
+	{-7, -11, 0x3fd0525fcdcd76b0, 0x3fea4e1f3dd2aa46, 0x3fc50ecfb6ef711c, 0x3fe3c6f57c57fff2, ElevationLowland},
+	{1000, 0, 0xbfd5cba98aa87957, 0x3fe2b361202f793d, 0xbfe45b7f8b9e820a, 0x3fcf5bb68ae2b2a8, ElevationDeepWater},
+	{0, 1000, 0xbfd9bd08d1a31a6b, 0x3fc12b8140ceb9ec, 0xbfe2b7d6c3259d99, 0x3fc428dd2bcd3e24, ElevationDeepWater},
+	{-1000, -1000, 0xbfd737c6aff61943, 0x3fe49bedbbf38da4, 0xbfe0bd7a1308d666, 0x3fc1a38ba7c41760, ElevationDeepWater},
+	{12345, -6789, 0xbfdbdbbb847c538b, 0x3fdf2371f44eea7c, 0xbfe9e28978d234d9, 0x3fc9de18520af4f8, ElevationDeepWater},
+	{32767, 0, 0x3fcee54d57bbe0e5, 0x3fea74561756cd7c, 0x3fb100e5aebf3e4a, 0x3ff0000000000000, ElevationLowland},
+	{0, 32767, 0x3fd4138510f8d44b, 0x3fe58e2d222110b6, 0x3fbaf217d2f2967d, 0x3ff0000000000000, ElevationLowland},
+	{-32767, 0, 0xbfbb6c4e8f06ef08, 0x3fe31f96f68562c3, 0xbfd44c2edee71d3b, 0x3ff0000000000000, ElevationDeepWater},
+	{0, -32767, 0x3fc3d59bbd54e739, 0x3fccfc01e8d94e01, 0xbfa46a3db6ae2994, 0x3fecffe95291e933, ElevationShallowWater},
+	{32767, -32767, 0x3fca7cdd62c1fb8d, 0x3fdb2536986de0e9, 0x3fdba56ce8ce9823, 0x3ff0000000000000, ElevationUpland},
+	{-32767, 32767, 0x3fad3b96cb75f082, 0x3fe36c5291d83da0, 0xbfb55fc9e368a457, 0x3fe5bfa89dbe5473, ElevationShallowWater},
+	{16384, -32767, 0x3fa4e3050c3a359e, 0x3fe8be41b1b44988, 0xbfb52a778728d721, 0x3ff0000000000000, ElevationShallowWater},
+	{65535, -32767, 0x3fc052cc757968ba, 0x3fd2ee9a8e1440c0, 0xbfc58e3b039ea18b, 0x3fe0b95e84b6136e, ElevationDeepWater},
+	{32768, 0, 0x3fad3b96cb75f082, 0x3fe36c5291d83da0, 0xbfb55fc9e368a457, 0x3fe5bfa89dbe5473, ElevationShallowWater},
+}
+
+func TestGoldenElevation(t *testing.T) {
+	if len(goldenElevationValues) != len(goldenCoords) {
+		t.Fatalf("the elevation golden table has %d rows for %d coordinates", len(goldenElevationValues), len(goldenCoords))
+	}
+
+	g := NewDefault(goldenSeed)
+	for i, row := range goldenElevationValues {
+		if [2]int64{row.q, row.r} != goldenCoords[i] {
+			t.Fatalf("row %d is for (%d, %d), want (%d, %d)", i, row.q, row.r, goldenCoords[i][0], goldenCoords[i][1])
+		}
+		c := NewCoord(row.q, row.r)
+		s := g.Sample(c)
+
+		for _, f := range []struct {
+			name string
+			got  uint64
+			want uint64
+		}{
+			{"elevation-raw", math.Float64bits(s.ElevationRaw), row.raw},
+			{"ridge", math.Float64bits(s.Ridge), row.ridge},
+			{"elevation", math.Float64bits(s.Elevation), row.elevation},
+			{"relief", math.Float64bits(g.Relief(c)), row.relief},
+		} {
+			if f.got != f.want {
+				t.Errorf("%s at (%d, %d) = %#016x (%v), want %#016x (%v)",
+					f.name, row.q, row.r, f.got, math.Float64frombits(f.got), f.want, math.Float64frombits(f.want))
+			}
+		}
+
+		if s.Band != row.band {
+			t.Errorf("band at (%d, %d) = %v, want %v", row.q, row.r, s.Band, row.band)
+		}
+	}
+}

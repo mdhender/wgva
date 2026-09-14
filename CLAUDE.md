@@ -4,23 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-**Phases 1, 2, and 3 have landed.** The root `wgva` package carries coordinates,
+**Phases 1 through 4 have landed.** The root `wgva` package carries coordinates,
 the wraparound normalizer, hashing, the owned noise, the `Field` composition tree
-with fbm and domain warping, the region anchors and their barycentric blend, and
+with fbm and domain warping, the region anchors and their barycentric blend, the
+elevation composite with its ridge structure and land/water classification, and
 the `Config`/`Generator` skeleton; `internal/mathx` carries the floor helpers,
 `Mul`, and the exact 128-bit arithmetic. Around it, `config` owns the canonical
 CBOR, the fingerprint, and the TOML file; `render` owns the viewport, the layers,
 and the two renders; `view` owns the window grammar; and `cmd/wgva-tune` is the
 terrain tuning tool.
 
-What does not exist yet is everything from phase 4 on: elevation, climate,
-basins, terrain, the rim profile, and every `store` or player-facing thing.
-Region parameters are normalized biases and nothing consumes them yet — what a
-bias is worth belongs to the phase that reads it. Eleven of the seventeen layers
-`DESIGN.md` 29 lists arrive with the phases that compute them, and
-`config/fingerprint_test.go` deliberately does not yet carry the written-down
-fingerprint constant — writing it down is what *settles* the defaults, and phase
-7 is where that decision belongs.
+What does not exist yet is everything from phase 5 on: climate, basins, terrain,
+the rim profile, and every `store` or player-facing thing. There is no `Tile` —
+elevation is reached through `ElevationAt`, `ElevationBandAt`, `Relief`, and
+`Sample`, and the tile that carries all three classifications arrives with
+terrain. Of the region parameters only the elevation bias, the roughness, and
+the ridge orientation are consumed; the rest wait for the phases that read them.
+Seven of the seventeen layers `DESIGN.md` 29 lists arrive with the phases that
+compute them, and `config/fingerprint_test.go` deliberately does not yet carry
+the written-down fingerprint constant — writing it down is what *settles* the
+defaults, and phase 7 is where that decision belongs.
 
 `DESIGN.md` is the specification and `AGENTS.md` is the working guidance, and
 both are still well ahead of the code. Treat a disagreement between them and the

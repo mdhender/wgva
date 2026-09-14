@@ -41,6 +41,15 @@ func TestConfigValidation(t *testing.T) {
 			func(c *Config) { c.SeaLevel = 1.5 }},
 		{"sea level below zero", "SeaLevel", ErrOutOfRange,
 			func(c *Config) { c.SeaLevel = -0.001 }},
+		// The interval is open, and these two are the reason. Each makes one
+		// side of the sea-level rescale a division by zero, and each names a
+		// world that is entirely one thing with no scale left to measure it
+		// against. This is the tightening TestValidConfigurations used to
+		// forbid, and the argument is here rather than in a memory.
+		{"sea level at zero", "SeaLevel", ErrOutOfRange,
+			func(c *Config) { c.SeaLevel = 0 }},
+		{"sea level at one", "SeaLevel", ErrOutOfRange,
+			func(c *Config) { c.SeaLevel = 1 }},
 
 		{"continental wavelength NaN", "Continental.WavelengthMiles", ErrNotFinite,
 			func(c *Config) { c.Continental.WavelengthMiles = math.NaN() }},
@@ -98,6 +107,44 @@ func TestConfigValidation(t *testing.T) {
 			func(c *Config) { c.Rim.Kind = RimKind(7) }},
 		{"rim wider than the map", "Rim.ClosedHexes+Rim.FalloffHexes", ErrOutOfRange,
 			func(c *Config) { c.Rim.ClosedHexes = uint32(WorldRadius) }},
+
+		// The elevation composite. Every weight is positive, the amounts are
+		// normalized, and the band ladder ascends from below sea level.
+		{"a silenced scale", "Elevation.LocalWeight", ErrNotPositive,
+			func(c *Config) { c.Elevation.LocalWeight = 0 }},
+		{"a negative weight", "Elevation.ContinentalWeight", ErrNotPositive,
+			func(c *Config) { c.Elevation.ContinentalWeight = -1 }},
+		{"a weight that is not finite", "Elevation.DetailWeight", ErrNotFinite,
+			func(c *Config) { c.Elevation.DetailWeight = math.Inf(1) }},
+		{"too many contrast passes", "Elevation.ContrastPasses", ErrPassCount,
+			func(c *Config) { c.Elevation.ContrastPasses = MaxContrastPasses + 1 }},
+		{"uplift above one", "Elevation.UpliftWeight", ErrOutOfRange,
+			func(c *Config) { c.Elevation.UpliftWeight = 1.5 }},
+		{"roughness influence below zero", "Elevation.RoughnessInfluence", ErrOutOfRange,
+			func(c *Config) { c.Elevation.RoughnessInfluence = -0.1 }},
+		{"a negative ridge stride", "Elevation.RidgeStrideMiles", ErrNotPositive,
+			func(c *Config) { c.Elevation.RidgeStrideMiles = -1 }},
+		// The onset divides, so zero is refused rather than clamped.
+		{"a ridge onset of zero", "Elevation.RidgeOnset", ErrNotPositive,
+			func(c *Config) { c.Elevation.RidgeOnset = 0 }},
+		{"a relief scale of zero", "Elevation.ReliefScale", ErrNotPositive,
+			func(c *Config) { c.Elevation.ReliefScale = 0 }},
+		// Deep water lies below sea level, which is zero. At or above it the
+		// band could never be reached from the water side.
+		{"deep water at sea level", "Elevation.Bands.DeepWater", ErrOutOfRange,
+			func(c *Config) { c.Elevation.Bands.DeepWater = 0 }},
+		{"deep water below the floor", "Elevation.Bands.DeepWater", ErrOutOfRange,
+			func(c *Config) { c.Elevation.Bands.DeepWater = -1.5 }},
+		{"upland at sea level", "Elevation.Bands.Upland", ErrNotAscending,
+			func(c *Config) { c.Elevation.Bands.Upland = 0 }},
+		{"highland below upland", "Elevation.Bands.Highland", ErrNotAscending,
+			func(c *Config) { c.Elevation.Bands.Highland = 0.1 }},
+		{"mountain equal to highland", "Elevation.Bands.Mountain", ErrNotAscending,
+			func(c *Config) { c.Elevation.Bands.Mountain = c.Elevation.Bands.Highland }},
+		{"a band above the ceiling", "Elevation.Bands.Mountain", ErrOutOfRange,
+			func(c *Config) { c.Elevation.Bands.Mountain = 1.5 }},
+		{"a ridge ladder below Nyquist", "Elevation.Ridge.WavelengthMiles", ErrBelowNyquist,
+			func(c *Config) { c.Elevation.Ridge.WavelengthMiles = 1 }},
 	}
 
 	for _, tc := range cases {
@@ -131,13 +178,20 @@ func TestConfigValidation(t *testing.T) {
 // a memory.
 func TestValidConfigurations(t *testing.T) {
 	cases := map[string]func(*Config){
-		"no warp":           func(c *Config) { c.WarpStrengthMiles = 0 },
-		"sea level at zero": func(c *Config) { c.SeaLevel = 0 },
-		"sea level at one":  func(c *Config) { c.SeaLevel = 1 },
+		"no warp": func(c *Config) { c.WarpStrengthMiles = 0 },
 		"wavelength at Nyquist": func(c *Config) {
 			c.Local = LadderConfig{WavelengthMiles: NyquistWavelengthMiles, Octaves: 1, Lacunarity: 2, Gain: 0.5}
 		},
 		"single octave": func(c *Config) { c.Detail.Octaves = 1 },
+		// Zero passes is the identity, which is a legitimate composite rather
+		// than a missing setting.
+		"no contrast": func(c *Config) { c.Elevation.ContrastPasses = 0 },
+		// A stride of zero is the isotropic web of creases, which is a
+		// legitimate ridge structure rather than a missing one.
+		"no ridge stride": func(c *Config) { c.Elevation.RidgeStrideMiles = 0 },
+		// And a ridge term worth nothing is a world without mountain belts,
+		// which is a choice.
+		"no ridges":     func(c *Config) { c.Elevation.RidgeWeight = 0 },
 		"gain of one":   func(c *Config) { c.Detail.Gain = 1 },
 		"polar ice rim": func(c *Config) { c.Rim.Kind = RimPolarIce },
 		// DESIGN.md 15.1: the unrimmed world must stay a valid configuration,

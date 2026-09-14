@@ -256,7 +256,7 @@ func TestInvalidConfigurationIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	spoiled := strings.ReplaceAll(string(base), "\nsea_level = 0.5\n", "\nsea_level = 1.5\n")
+	spoiled := strings.ReplaceAll(string(base), "\nsea_level = 0.62\n", "\nsea_level = 1.5\n")
 	if spoiled == string(base) {
 		t.Fatal("the test did not find the line it meant to change")
 	}

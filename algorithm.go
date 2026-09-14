@@ -51,4 +51,12 @@ const WorldRadius int64 = 32767
 //	   sampling offset. Config gained the four octave ladders, the detail scale,
 //	   and the warp ladder, and lost the four bare wavelength fields, so no
 //	   version 1 configuration can be read.
-const AlgorithmVersion uint32 = 2
+//	3  Elevation. The composite of DESIGN.md 10 — the weighted sum of the four
+//	   scales, the contrast pass over the coarse half, regional uplift, the
+//	   ridge structure and its directional blur, and the sea-level rescale that
+//	   puts sea level at exactly zero — with local relief, land/water, and the
+//	   elevation bands. Config gained ElevationConfig, and SeaLevel's interval
+//	   closed at both ends, so no version 2 configuration can be read. No value
+//	   this version already produced moved: the four scales and the region blend
+//	   are untouched, and their golden tables stand.
+const AlgorithmVersion uint32 = 3

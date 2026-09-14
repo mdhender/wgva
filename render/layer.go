@@ -73,15 +73,17 @@ var ErrUnknownLayer = errors.New("unknown layer")
 
 // AllLayers returns every layer, in a fixed order.
 //
-// DESIGN.md 29 lists seventeen. Six of them are here, and they are the six that
+// DESIGN.md 29 lists seventeen. Ten of them are here, and they are the ten that
 // exist: the raw noise scales of DESIGN.md 10, which separate "the noise is
-// wrong" from "the composition is wrong" when a window looks off, and the two
-// that draw the blended region influence of DESIGN.md 11.2 — which is what the
+// wrong" from "the composition is wrong" when a window looks off; the four the
+// elevation composite adds, which separate it further into the four scales
+// alone, the finished scalar, the slope, and the ridge term; and the two that
+// draw the blended region influence of DESIGN.md 11.2 — which is what the
 // anchor lattice has to be looked for in, because a lattice nothing draws is a
-// lattice nobody sees until it is under a coastline. Elevation, climate,
-// terrain, relief, the ridge term, the basins, and the rim arrive with the
-// phases that compute them; a layer that named a field nothing generates yet
-// would be a control that draws an error.
+// lattice nobody sees until it is under a coastline. Climate, terrain, the
+// basins, the volcanic field, and the rim arrive with the phases that compute
+// them; a layer that named a field nothing generates yet would be a control
+// that draws an error.
 func AllLayers() []Layer { return slices.Clone(layers) }
 
 // LayerNamed returns the layer with that name.
@@ -126,6 +128,54 @@ func buildLayers() []Layer {
 			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.ScaleAt(s, c) },
 		})
 	}
+
+	// The four elevation layers, in the order a window is read when it looks
+	// wrong: what the noise summed to, what the composite made of it, how steep
+	// the result is, and what the ridge term was contributing. Only the first
+	// two draw the same quantity at two stages, and that pair is the point —
+	// between them sit the contrast pass, the regional uplift, and the ridges,
+	// so a coastline that looks wrong in one and right in the other has named
+	// its own cause.
+	out = append(out,
+		Layer{
+			Name:   "elevation-raw",
+			Doc:    "the weighted sum of the four continuous scales alone, before the contrast pass, the uplift, and the ridges",
+			Cost:   1,
+			key:    signedKey,
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.Sample(c).ElevationRaw },
+		},
+		Layer{
+			Name: "elevation",
+			Doc:  "the elevation scalar: -1 deep ocean, 0 sea level, +1 extreme highland",
+			Cost: 1,
+			key: Key{
+				Kind: KeyRamp, Ramp: ElevationRamp,
+				Lo: -1, Hi: +1, LoLabel: "deep ocean", HiLabel: "extreme highland",
+			},
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.ElevationAt(c) },
+		},
+		Layer{
+			Name: "relief",
+			Doc:  "local steepness: the mean elevation difference to the six neighbors",
+			// Seven evaluations a tile, because it reads the six neighboring
+			// elevation scalars as well as its own. This is the whole reason
+			// the tuning tool's budget is counted in evaluations rather than in
+			// tiles. DESIGN.md 18 and 29.
+			Cost: 7,
+			key: Key{
+				Kind: KeyRamp, Ramp: UnitRamp,
+				Lo: 0, Hi: 1, LoLabel: "flat", HiLabel: "steep",
+			},
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.Relief(c) },
+		},
+		Layer{
+			Name:   "ridge",
+			Doc:    "the ridge structure term, before the region roughness scales it and before the land mask confines it to land",
+			Cost:   1,
+			key:    signedKey,
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.Sample(c).Ridge },
+		},
+	)
 
 	// The two region layers. Both draw one blended anchor parameter, and both
 	// are here for the same reason: the anchor lattice is invisible in a

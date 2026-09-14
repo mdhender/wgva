@@ -3713,7 +3713,7 @@ to change:
 
 | Rule | Sentinel | Why |
 |---|---|---|
-| `SeaLevel` in `[0, 1]` | `ErrOutOfRange` | it is a normalized threshold |
+| `SeaLevel` in `(0, 1)` | `ErrOutOfRange` | it is a normalized threshold, and each endpoint makes one branch of the sea-level rescale a division by zero; appendix D.9 |
 | Base wavelengths at or above Nyquist | `ErrBelowNyquist` | a base below the limit is the same defect as a ladder reaching below it, one step earlier |
 | `WarpStrengthMiles >= 0` | `ErrNotPositive` | zero disables the warp and is a legitimate setting, not a missing one |
 | Cell sizes positive and at most `WorldRadius` | `ErrNotPositive`, `ErrOutOfRange` | a level larger than the map addresses one cell |
@@ -3805,3 +3805,152 @@ Two smaller decisions the body leaves open:
   angle.
 
 *Phase 3.*
+
+### D.9 The elevation composite, written out
+
+Section 10 gives the composite as a sum of five terms and section 14 gives the
+scalar's three anchor values. It does not say how the terms are weighted against
+each other, where sea level enters, or what the ridge structure term is made of.
+This is what phase 4 settled.
+
+```text
+coarse  = (wC*continentalness + wR*regional) / w      w = wC + wR + wL + wD
+fine    = (wL*local + wD*detail) / w
+raw     = coarse + fine                               the `elevation-raw` layer
+shaped  = contrast(coarse, passes)
+rough   = 1 + roughnessInfluence * regionRoughness
+base    = shaped + rough*fine + upliftWeight*regionElevationBias
+mask    = smoothstep(base / ridgeOnset)
+elev    = rescale(clamp(base + ridgeWeight*rough*ridge*mask))
+```
+
+One divisor over all four weights, so `raw` is a weighted average in `[-1, +1]`
+and neither half is normalized against itself.
+
+Four decisions in that, each of which could have gone another way:
+
+- **The contrast pass is applied to the coarse half only.** A weighted sum of
+  four fields is more concentrated about its middle than any one of them, which
+  draws a coastline as a wide band of near-sea-level ground rather than as a
+  line. One smoothstep pass in `[0, 1]` — three of them would be a two-valued
+  mask — fixes that. Applied to the whole composite it would flatten the hills
+  as well, which is the opposite of what it is for. `ErrPassCount` is the
+  sentinel section 19.1 reserved for exactly this count.
+- **Region roughness scales the fine half and the ridges, and nothing else.**
+  That is what makes it mean "relief here is exaggerated or subdued" rather than
+  "here is higher", which is what the elevation bias already means. It is the
+  division section 12 asks for: the bias is normalized and the phase that reads
+  it decides the quantity.
+- **Sea level is a fraction of the composite's range, not a threshold on the
+  scalar.** The two sides are rescaled by different factors — `[-1, seaLevel]`
+  onto `[-1, 0]` and `[seaLevel, +1]` onto `[0, +1]` — so the land fraction is
+  tunable without the meaning of the scalar moving. Zero is sea level at every
+  setting, which is what makes section 15's rule a fact about the scale rather
+  than a threshold somebody can move out from under it. The interval is open at
+  both ends because each endpoint makes one branch a division by zero, which is
+  why `SeaLevel` is the one normalized value validated against `(0, 1)` rather
+  than `[0, 1]`; appendix D.6's row is amended by this entry.
+- **The ridge term is masked off at and below sea level.** Without it a mountain
+  belt surfaces as a chain of islands in open ocean wherever the belt crosses a
+  basin. The mask rises over the first `ridgeOnset` of land so the coast is not
+  a wall.
+
+Basin influence is absent by construction. Section 17.1 puts it in a product
+with moisture and keeps it out of elevation entirely, and there is nothing here
+for a later phase to remove.
+
+*Phase 4.*
+
+### D.10 The ridge structure, and the stride bound that is not validated
+
+The ridge term is the usual fold, `1 - 2*|f|`, of its own fbm field under its own
+hashing domain. The fold creases the field along its own zero set, which is a
+network of curves, and it has a positive mean by construction — intended rather
+than tolerated, because a term whose mean was zero would carve as much as it
+raised and a mountain belt is ground that stands above what is around it. What
+the mean costs is that `SeaLevel` and the band ladder are tuned against a
+composite that includes it, which is what the tuning tool is for.
+
+Section 12's ridge orientation enters as a **symmetric three-tap blur along the
+orientation**: weights `1/4, 1/2, 1/4` at `p - L*u`, `p`, `p + L*u`. Blurring
+along a direction removes variation in that direction, so what survives is
+structure that is constant along it — belts running with the region's grain
+rather than an isotropic web. The stencil is symmetric in the stride, so the
+orientation's arrow does not change the value, which matters because an
+orientation is a line and its arrow is whichever one the half-angle recovery
+happened to pick.
+
+**The obvious implementation is wrong, and the reason generalizes.** Rotating or
+shearing the sampling frame by the blended orientation — sampling at `(p·u, p·n)`
+instead of `p` — looks equivalent and is not, because the position it produces is
+proportional to `|p|`. At the rim `|p|` is about 170,000 miles, so a thousandth of
+a radian of orientation change moves the sampled point further than the local
+wavelength and the term decorrelates into noise everywhere except near the
+origin. A displacement of a fixed number of miles has no such term: its
+sensitivity to the orientation is bounded by the stride wherever it is
+evaluated.
+
+**What the stride costs, measured.** The barycentric blend of section 11.2 is
+`C0` but not `C1` across a triangle edge — the two shared anchors' weights are
+even in the signed distance from the edge, so their first derivative flips sign
+across it. That is invisible in a blended *value*, which is why the
+`region-influence` layer shows no lattice at any scale. Displacing a sampling
+position by the orientation amplifies it: the ridge field's value stays
+continuous and its *gradient* does not, and a gradient discontinuity under
+shading is a line.
+
+At the default region size of 128 hexes and a ridge ladder whose shortest octave
+is 45 miles:
+
+| stride | what the `ridge` layer shows at one pixel per hex |
+|---:|---|
+| 120 miles | the region lattice, as a triangular mesh of creases, plus washed-out crests |
+| 45 miles | directional grain, crests intact, no lattice |
+| 0 | the isotropic web; the orientation is not read at all |
+
+**So the stride must not exceed the ridge ladder's shortest octave.** That is a
+bound on a ratio and it is scale-invariant — elongation needs a stride of about
+a wavelength and the artifact appears at about three, so the two cannot be
+separated by retuning either one. It is documented rather than validated: it is
+a judgment about what a picture looks like, the tuning tool is where that
+judgment is made, and `RidgeStrideMiles = 0` is a legitimate setting that a
+mechanical bound would have to special-case anyway.
+
+The other course was to make the region blend `C1`, which is a change to section
+11.2's scheme and moves every region value in every world. It is not owed: at a
+stride within the bound there is nothing to fix.
+
+*Phase 4.*
+
+### D.11 What the defaults were tuned to
+
+Phase 7 settles the defaults by writing down a fingerprint. These are what phase
+4 left them at, and the numbers are recorded because the next person to move one
+should know what moving it was measured against. Over 20,000 coordinates spread
+across the whole map, at four seeds, under the shipped defaults:
+
+| | |
+|---|---:|
+| land fraction | 0.31 |
+| deep water | 0.55 |
+| shallow water | 0.13 |
+| lowland | 0.14 |
+| upland | 0.11 |
+| highland | 0.05 |
+| mountain | 0.01 |
+| relief, median | 0.23 |
+| relief, 99th percentile | 0.93 |
+
+The land fraction is the one number with an argument behind it: section 4.2
+reasons about the world's size at a 30% land fraction, so that is what the
+defaults produce. Everything else is what fell out, and the distribution test
+bounds it loosely on purpose — it asserts that every band is reachable and none
+swallows the world, which is a test of the thresholds rather than of the tuning.
+
+The weights descend steeply — `1 : 0.3 : 0.12 : 0.04` — and that was measured
+too. At `0.45` for the regional scale the continents are lace at any scale where
+a continent fits in the window: the regional field punches holes through the
+continental blobs faster than the contrast pass can close them. The fine weights
+came down with it for the same reason, on the coast rather than in the interior.
+
+*Phase 4.*

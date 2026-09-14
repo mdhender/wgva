@@ -209,7 +209,7 @@ func (s *server) newPage(tab string, req request) page {
 		}
 	}
 
-	tree := req.gen.ScaleField(scaleOf(req.view.Layer))
+	tree := fieldTreeFor(req.gen, req.view.Layer)
 	p.FieldTree = tree.Describe()
 
 	switch tab {
@@ -244,13 +244,23 @@ func (s *server) newPage(tab string, req request) page {
 // scaleOf maps a layer name back to the scale whose tree it draws. Every layer
 // in this phase is one of the four raw scales; the fallback is the coarsest,
 // which is what a tree panel should show when a layer has no single tree.
-func scaleOf(layer string) wgva.Scale {
+// fieldTreeFor returns the derived field tree a layer is drawn from, so the
+// page can print what was actually evaluated beside the window.
+//
+// Most layers are not one field — the elevation composite is four of them and a
+// fold, and a region bias is no field at all — so the fallback is the coarsest
+// scale, which is the one that says whether the world has a shape at all. That
+// is a display choice and nothing reads it.
+func fieldTreeFor(g *wgva.Generator, layer string) wgva.Field {
+	if layer == "ridge" {
+		return g.RidgeField()
+	}
 	for _, s := range wgva.Scales() {
 		if s.String() == layer {
-			return s
+			return g.ScaleField(s)
 		}
 	}
-	return wgva.ScaleContinental
+	return g.ScaleField(wgva.ScaleContinental)
 }
 
 // configGroups lays the field table out for the form, marking every field that

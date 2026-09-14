@@ -67,7 +67,8 @@ type Field struct {
 // Fields returns every configuration key, in file order.
 //
 // The order is the order a person reads: what the world is, then the four
-// continuous scales coarse to fine, then the warp, then the addressing
+// continuous scales coarse to fine, then the warp, then what the elevation
+// composite makes of them, then the ridge structure, then the addressing
 // hierarchy, then the rim.
 func Fields() []Field { return fieldTable }
 
@@ -76,7 +77,7 @@ var fieldTable = buildFieldTable()
 func buildFieldTable() []Field {
 	table := []Field{{
 		Key: "sea_level", Path: "SeaLevel", Group: "world", Kind: ValueScalar,
-		Doc: "normalized elevation at which land begins, in [0, 1]",
+		Doc: "where land begins, as a fraction of the elevation composite's range, in (0, 1); it decides the land fraction, and the elevation scalar puts sea level at zero whatever it is set to",
 	}}
 
 	table = append(table, ladderFields("continental", "Continental",
@@ -90,10 +91,28 @@ func buildFieldTable() []Field {
 	table = append(table, ladderFields("warp", "Warp",
 		"the domain warp's own field; DESIGN.md 13")...)
 
+	table = append(table, Field{
+		Key: "warp_strength_miles", Path: "WarpStrengthMiles", Group: "warp", Kind: ValueScalar,
+		Doc: "how far the warp displaces the sampling position; zero disables the warp",
+	})
+
+	table = append(table, elevationFields()...)
+
+	table = append(table, ladderFields("ridge", "Elevation.Ridge",
+		"the ridge structure's own field; its wavelength is the spacing of a mountain belt, not of a peak")...)
+
 	return append(table, []Field{
 		{
-			Key: "warp_strength_miles", Path: "WarpStrengthMiles", Group: "warp", Kind: ValueScalar,
-			Doc: "how far the warp displaces the sampling position; zero disables the warp",
+			Key: "ridge_stride_miles", Path: "Elevation.RidgeStrideMiles", Group: "ridge", Kind: ValueScalar,
+			Doc: "how far the directional blur reaches along the region's ridge orientation; zero leaves an isotropic web of creases",
+		},
+		{
+			Key: "ridge_weight", Path: "Elevation.RidgeWeight", Group: "ridge", Kind: ValueScalar,
+			Doc: "what the ridge term is worth in the elevation composite, in [0, 1]",
+		},
+		{
+			Key: "ridge_onset", Path: "Elevation.RidgeOnset", Group: "ridge", Kind: ValueScalar,
+			Doc: "how far above sea level the ridge term reaches full strength; below it ridges are masked off so a belt does not surface as islands in open ocean",
 		},
 		{
 			Key: "macro_region_size_hexes", Path: "MacroRegionSizeHexes", Group: "hierarchy", Kind: ValueCount,
@@ -124,6 +143,63 @@ func buildFieldTable() []Field {
 			},
 		},
 	}...)
+}
+
+// elevationFields returns the keys of the elevation composite: what each
+// continuous scale is worth, how hard the coast is sharpened, what a region's
+// biases buy, and where the bands fall. The ridge structure is its own group
+// and follows this one.
+func elevationFields() []Field {
+	return []Field{
+		{
+			Key: "elevation_continental_weight", Path: "Elevation.ContinentalWeight", Group: "elevation", Kind: ValueScalar,
+			Doc: "what the continental scale is worth in the composite; the weights are relative and are normalized by their own total",
+		},
+		{
+			Key: "elevation_regional_weight", Path: "Elevation.RegionalWeight", Group: "elevation", Kind: ValueScalar,
+			Doc: "what the regional scale is worth in the composite",
+		},
+		{
+			Key: "elevation_local_weight", Path: "Elevation.LocalWeight", Group: "elevation", Kind: ValueScalar,
+			Doc: "what the local scale is worth in the composite",
+		},
+		{
+			Key: "elevation_detail_weight", Path: "Elevation.DetailWeight", Group: "elevation", Kind: ValueScalar,
+			Doc: "what the detail scale is worth in the composite",
+		},
+		{
+			Key: "elevation_contrast_passes", Path: "Elevation.ContrastPasses", Group: "elevation", Kind: ValueCount,
+			Doc: "how many S-curve passes sharpen the coarse half, pulling the coastline off a wide band of near-sea-level ground; zero is the identity",
+		},
+		{
+			Key: "elevation_uplift_weight", Path: "Elevation.UpliftWeight", Group: "elevation", Kind: ValueScalar,
+			Doc: "what a region's elevation bias is worth in elevation, in [0, 1]",
+		},
+		{
+			Key: "elevation_roughness_influence", Path: "Elevation.RoughnessInfluence", Group: "elevation", Kind: ValueScalar,
+			Doc: "how far a region's roughness bias may exaggerate or subdue the fine scales and the ridges, in [0, 1]",
+		},
+		{
+			Key: "relief_scale", Path: "Elevation.ReliefScale", Group: "elevation", Kind: ValueScalar,
+			Doc: "relief per unit of elevation difference across one hex; it turns the mean neighbor difference into the normalized relief value",
+		},
+		{
+			Key: "elevation_deep_water", Path: "Elevation.Bands.DeepWater", Group: "elevation", Kind: ValueScalar,
+			Doc: "the elevation at or below which water is deep; negative, because zero is sea level",
+		},
+		{
+			Key: "elevation_upland", Path: "Elevation.Bands.Upland", Group: "elevation", Kind: ValueScalar,
+			Doc: "where land stops being lowland; above sea level and below the highland threshold",
+		},
+		{
+			Key: "elevation_highland", Path: "Elevation.Bands.Highland", Group: "elevation", Kind: ValueScalar,
+			Doc: "where upland becomes highland",
+		},
+		{
+			Key: "elevation_mountain", Path: "Elevation.Bands.Mountain", Group: "elevation", Kind: ValueScalar,
+			Doc: "where highland becomes mountain",
+		},
+	}
 }
 
 // ladderFields returns the four keys of one fbm ladder.

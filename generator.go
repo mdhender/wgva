@@ -23,6 +23,12 @@ type Generator struct {
 	// never written again, which is what keeps the struct safe to read from any
 	// number of goroutines without a lock.
 	scales [scaleCount]Field
+
+	// ridge is the derived field the ridge structure term of DESIGN.md 10 is
+	// folded from. It is separate from scales because it is not one of the four
+	// continuous scales a diagnostic layer draws raw: what a window shows is
+	// the fold, which is what elevation reads.
+	ridge Field
 }
 
 // New returns a generator for the seed and configuration, or the first reason
@@ -42,6 +48,12 @@ func New(seed Seed, cfg Config) (*Generator, error) {
 			return nil, err
 		}
 	}
+
+	g.ridge = DeriveRidgeField(seed, cfg)
+	if err := g.ridge.Validate(); err != nil {
+		return nil, err
+	}
+
 	return g, nil
 }
 
@@ -119,6 +131,26 @@ type Sample struct {
 	// elevation makes of two of these biases, and neither exists until it does.
 	Region RegionParams
 
+	// ElevationRaw is the weighted sum of the four continuous scales alone,
+	// before the contrast pass, the regional uplift, and the ridges. It is what
+	// separates "the composition is wrong" from "one of the later terms is".
+	ElevationRaw float64
+
+	// RegionalUplift is what the region's elevation bias is worth here, in
+	// elevation. Region is the bias; this is the quantity.
+	RegionalUplift float64
+
+	// Ridge is the ridge structure term, before the region roughness scales it
+	// and before the land mask confines it to land. DESIGN.md 4.3.
+	Ridge float64
+
+	// Elevation is the elevation scalar: -1 deep ocean, 0 sea level, +1 extreme
+	// highland. It is bit-identical to ElevationAt, which a test asserts.
+	Elevation float64
+
+	// Band is the elevation classification of that scalar.
+	Band Elevation
+
 	// RimDistance is hexes from the outer edge of the map. See DESIGN.md 15.1.
 	RimDistance int64
 }
@@ -129,13 +161,24 @@ type Sample struct {
 // a convenience that computed something slightly different from the thing it is
 // a convenience for would be worse than not having it.
 func (g *Generator) Sample(c Coord) Sample {
+	// One evaluation of the composite, taken apart. A Sample does not carry a
+	// Tile and does not call Relief: a sample is one elevation evaluation and
+	// relief is seven, which is the distinction render.Layer.Cost is built on.
+	// DESIGN.md 4.3.
+	parts := g.elevationAt(c)
+
 	return Sample{
 		Coord:           c,
-		Continentalness: g.ScaleAt(ScaleContinental, c),
-		Regional:        g.ScaleAt(ScaleRegional, c),
-		Local:           g.ScaleAt(ScaleLocal, c),
-		Detail:          g.ScaleAt(ScaleDetail, c),
-		Region:          g.RegionInfluence(c),
+		Continentalness: parts.scales[ScaleContinental-1],
+		Regional:        parts.scales[ScaleRegional-1],
+		Local:           parts.scales[ScaleLocal-1],
+		Detail:          parts.scales[ScaleDetail-1],
+		Region:          parts.region,
+		ElevationRaw:    parts.raw,
+		RegionalUplift:  parts.uplift,
+		Ridge:           parts.ridge,
+		Elevation:       parts.elevation,
+		Band:            g.cfg.Elevation.Bands.Classify(parts.elevation),
 		RimDistance:     c.RimDistance(),
 	}
 }

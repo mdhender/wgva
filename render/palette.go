@@ -76,3 +76,36 @@ func lerpChannel(a, b uint8, t float64) uint8 {
 	v := float64(a) + (float64(b)-float64(a))*t
 	return uint8(min(max(math.Round(v), 0), 255))
 }
+
+// ElevationRamp is the diagnostic ramp for the elevation scalar of
+// DESIGN.md 14, whose zero is sea level.
+//
+// The break at 0.5 is deliberate and is the whole reason this ramp exists
+// rather than SignedRamp: the two stops either side of the midpoint are a step
+// rather than a blend, so a coastline is drawn as a line at exactly the place
+// the land/water rule puts it. A ramp that faded through the middle would make
+// the one contour this layer is read for the one contour it could not show.
+//
+// Below the break it runs deep ocean to shelf; above it, coastal green through
+// upland brown to snow. Those are conventions rather than data — the bands are
+// cut by ElevationBands and a color is not a threshold — but a diagnostic ramp
+// that disagreed with every atlas ever printed would be read wrong.
+var ElevationRamp = Ramp{
+	{At: 0.00, Color: color.RGBA{R: 0x04, G: 0x14, B: 0x33, A: 0xff}},
+	{At: 0.35, Color: color.RGBA{R: 0x1d, G: 0x52, B: 0x8c, A: 0xff}},
+	{At: 0.50, Color: color.RGBA{R: 0x74, G: 0xb3, B: 0xd4, A: 0xff}},
+	{At: 0.5001, Color: color.RGBA{R: 0x3f, G: 0x6f, B: 0x3a, A: 0xff}},
+	{At: 0.65, Color: color.RGBA{R: 0x8f, G: 0x9c, B: 0x4a, A: 0xff}},
+	{At: 0.82, Color: color.RGBA{R: 0x9c, G: 0x6f, B: 0x40, A: 0xff}},
+	{At: 1.00, Color: color.RGBA{R: 0xf4, G: 0xf4, B: 0xf0, A: 0xff}},
+}
+
+// UnitRamp is the diagnostic ramp for a field in [0, 1]. It is sequential
+// rather than diverging because such a field has no zero crossing to find: what
+// a reader wants from relief is where it is high, not where it changes sign.
+var UnitRamp = Ramp{
+	{At: 0.00, Color: color.RGBA{R: 0x10, G: 0x14, B: 0x20, A: 0xff}},
+	{At: 0.35, Color: color.RGBA{R: 0x39, G: 0x5c, B: 0x7a, A: 0xff}},
+	{At: 0.70, Color: color.RGBA{R: 0xc0, G: 0x9a, B: 0x54, A: 0xff}},
+	{At: 1.00, Color: color.RGBA{R: 0xfb, G: 0xf3, B: 0xdc, A: 0xff}},
+}
