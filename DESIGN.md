@@ -3941,11 +3941,26 @@ across the whole map, at four seeds, under the shipped defaults:
 | relief, median | 0.23 |
 | relief, 99th percentile | 0.93 |
 
-The land fraction is the one number with an argument behind it: section 4.2
-reasons about the world's size at a 30% land fraction, so that is what the
-defaults produce. Everything else is what fell out, and the distribution test
-bounds it loosely on purpose — it asserts that every band is reachable and none
-swallows the world, which is a test of the thresholds rather than of the tuning.
+The land fraction is the one number with an argument behind it, and the argument
+is **that it mimics Earth's land-to-water ratio**: Earth is a little under 30%
+land, so a world that reads as a world to somebody who has seen an atlas is one
+that puts roughly three tiles of water behind every tile of ground. That is a
+choice about what a map looks like, and it is the reason `SeaLevel` sits where
+it does.
+
+Section 4.2 reaches the same number from the other direction, and the
+coincidence is worth naming so that nobody mistakes one for the other. There,
+30% is a *pessimistic assumption* used to argue that the shipped radius holds
+enough walkable ground; it is an input to a sizing argument and was never a
+constraint on the generator. It is convenient that the two agree — the sizing
+argument holds at the shipped defaults with nothing to reconcile — but if the
+appearance of the map ever wants a different ratio, 4.2 is not what forbids it.
+Section 4.2's tables are a floor and this is a preference, and neither is
+evidence about the other.
+
+Everything else is what fell out, and the distribution test bounds it loosely on
+purpose — it asserts that every band is reachable and none swallows the world,
+which is a test of the thresholds rather than of the tuning.
 
 The weights descend steeply — `1 : 0.3 : 0.12 : 0.04` — and that was measured
 too. At `0.45` for the regional scale the continents are lace at any scale where
