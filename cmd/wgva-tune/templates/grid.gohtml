@@ -11,10 +11,20 @@
   <div class="row">{{range .Strides}}<a href="{{.URL}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}</div>
   <p class="doc">One cell per <em>n</em> hexes. The world is 65,535 hexes across, so a wide window at a
   coarse sampling is how all of it fits in one image.</p>
-  <p class="doc">A stride is point sampling, not averaging, so a stride coarser than the layer's
-  finest octave aliases it and the picture becomes speckle. That is the Nyquist argument of the octave
-  ladder seen from the other end. Keep the stride's wavelength — six miles times the stride — above the
-  ladder's shortest octave, or move to a coarser layer.</p>
+  <p class="doc">A pixel here spans about 6·<em>n</em> miles, so a feature gets
+  <strong>wavelength ÷ 6<em>n</em></strong> pixels. The continental scale is 6,000 miles: 83 pixels
+  across at 1:12, 32 at 1:31, 11 at 1:88. Below a few tens of pixels a feature stops being a shape and
+  becomes a dot, and a wide window full of dots is a wide window, not a broken render.</p>
+  <p class="doc">Aliasing is a second, smaller effect. A stride point-samples rather than averages, so
+  the shortest wavelength it can carry is <strong>12·<em>n</em> miles</strong> and octaves below that
+  arrive aliased — the Nyquist rule of the octave ladder with the sampling grid changed. At 1:88 the
+  limit is 1,056 miles and the continental ladder's two finest octaves, at 750 and 375, are both under
+  it. Measured, that adds about half again to the pixel-to-pixel variation: it roughens the edges of
+  features, it does not create them.</p>
+  <p class="doc">So if a whole-world window looks like gravel, read it as a statement about the
+  configuration before reading it as one about the renderer. The world is 393,210 miles across and
+  <code>continental_wavelength_miles</code> is 6,000, which is sixty-five continents from edge to edge
+  however large the image is. The field to move is that one.</p>
 </div>
 <div class="panel">{{template "controls" .}}</div>
 {{end}}

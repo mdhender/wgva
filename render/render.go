@@ -328,15 +328,26 @@ func borderCells(v Viewport) [][2]int {
 //     drawing both as one pixel stretches the image vertically by about fifteen
 //     percent and flattens the half-hex column stagger. That is the price of the
 //     view.
-//   - A stride is point sampling, not averaging, so a stride coarser than a
-//     field's finest octave aliases it. That is the same arithmetic as
-//     DESIGN.md 9.3 seen from the other end: there the tile grid's Nyquist
-//     wavelength bounds the octave ladder, and here the stride's does. A window
-//     drawn at a stride of eighty-eight samples every 528 miles, which is well
-//     below the continental ladder's finest octave at 375, and the picture is
-//     speckle rather than continents. The number to keep under is the stride's
-//     wavelength against the ladder's shortest, and a coarser layer is the way
-//     to look at a wider window.
+//
+//   - A stride is point sampling, not averaging. It samples every 6*stride
+//     miles or so, which decides how many pixels a feature gets: wavelength
+//     divided by 6*stride. The default continental scale is 6000 miles, so it is
+//     eighty-three pixels across at a stride of twelve and eleven at a stride of
+//     eighty-eight. Below a few tens of pixels a feature stops being a shape and
+//     becomes a dot, and that is a property of the window rather than a defect
+//     in the render.
+//
+//   - Aliasing is a second and smaller effect. The shortest wavelength a stride
+//     can carry is twice its spacing, 12*stride miles, and an octave below that
+//     limit arrives aliased. This is DESIGN.md 9.3's rule with the sampling grid
+//     changed: there the tile grid's own Nyquist wavelength of 12 miles bounds
+//     the octave ladder, here this stride's bounds what the ladder can be looked
+//     at through. At a stride of eighty-eight the limit is 1056 miles and the
+//     continental ladder's finest two octaves, at 750 and 375, are under it —
+//     which measurement puts at about half again the pixel-to-pixel variation.
+//     It roughens the edges of features; it does not create them. A single
+//     unaliasable octave at the same stride draws the same picture.
+
 func RenderGrid(g *wgva.Generator, v Viewport, l Layer, pixelsPerCell int) (*image.RGBA, error) {
 	if pixelsPerCell < 1 || pixelsPerCell > MaxPixels {
 		return nil, &RenderError{What: "scale", Value: pixelsPerCell, Lo: 1, Hi: MaxPixels, Err: ErrPixelScale}
