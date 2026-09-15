@@ -166,7 +166,7 @@ func (s *server) newPage(tab string, req request) page {
 	// the whole line. Neither half is redundant — the fingerprint cannot see a
 	// generator fix nobody versioned, and the build identity cannot see a
 	// setting nudged in this process. See DESIGN.md 29.5.
-	p.CreateLine = fmt.Sprintf("wgva-world create --seed %s --expect %s/%s --out world.wgva",
+	p.CreateLine = fmt.Sprintf("wgva-world create --seed %s --expect %s/%s world.wgva",
 		p.SeedText, p.Build, d.String())
 
 	base := "/seed/" + p.SeedText

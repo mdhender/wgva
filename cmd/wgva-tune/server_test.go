@@ -470,6 +470,16 @@ func TestPagesCarryTheCreateLine(t *testing.T) {
 				t.Errorf("GET %s does not carry %q", path, want)
 			}
 		}
+		// The whole value of emitting the line is that it is pasted rather than
+		// typed, so its shape has to be the shape wgva-world takes: the path is
+		// positional and there is no --out. A line that has to be edited before
+		// it runs is a line somebody edits wrong.
+		if !strings.Contains(body, "--expect "+wgva.Version().String()+"/"+d.String()+" world.wgva") {
+			t.Errorf("GET %s does not emit the pair and the path in the form wgva-world takes", path)
+		}
+		if strings.Contains(body, "--out world.wgva") {
+			t.Errorf("GET %s emits --out; wgva-world create takes the path positionally", path)
+		}
 	}
 }
 
