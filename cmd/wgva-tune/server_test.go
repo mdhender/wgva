@@ -441,3 +441,48 @@ func TestPagesCarryTheCreateLine(t *testing.T) {
 		}
 	}
 }
+
+// TestMapTabCountsTheWindow is the readout of DESIGN.md 29.1: the map tab says
+// what is in the window it is drawing, every declared value is listed, and the
+// grid tab shows none of it.
+func TestMapTabCountsTheWindow(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	_, body := get(t, ts, seedPath()+"?q=0&r=0&cols=21&rows=15")
+	if !strings.Contains(body, "what is in this window") {
+		t.Fatalf("the map tab carries no readout: %q", firstLine(body))
+	}
+	if !strings.Contains(body, "315 tiles") {
+		t.Errorf("the readout does not name the number of tiles it counted")
+	}
+	// Every declared terrain, including the two DESIGN.md 17.1 emits nowhere. A
+	// row reading zero is usually the row somebody is trying to move off zero.
+	for _, want := range []string{"inland-sea", "lake", "plains", "coast"} {
+		if !strings.Contains(body, ">"+want+"<") {
+			t.Errorf("the readout does not list %q", want)
+		}
+	}
+
+	_, grid := get(t, ts, seedPath()+"/grid?cols=21&rows=15")
+	if strings.Contains(grid, "what is in this window") {
+		t.Error("the grid tab carries a readout; a million tiles of readout is a second copy of the image's work")
+	}
+}
+
+// TestMapPageIsBudgeted states that the page is budgeted and not only the
+// image. A readout costs a whole tile per cell whatever layer is on screen, so
+// a page that counted an unbounded window would be the one endpoint here that a
+// careless window size could stall.
+func TestMapPageIsBudgeted(t *testing.T) {
+	_, ts := newTestServer(t)
+	resp, body := get(t, ts, seedPath()+"?cols=1001&rows=1001")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("GET an oversized map page returned %d, want 400", resp.StatusCode)
+	}
+	if !strings.Contains(body, "7014007") {
+		t.Errorf("the refusal does not name the number of evaluations: %q", firstLine(body))
+	}
+	if !strings.Contains(body, "--budget") {
+		t.Errorf("the refusal does not say how the budget moves: %q", firstLine(body))
+	}
+}

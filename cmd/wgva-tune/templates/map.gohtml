@@ -4,7 +4,33 @@
   <img src="{{.ImageURL}}" alt="the {{.View.Layer}} layer">
   <p class="doc">Drawn as the viewer draws it: flat-top hexes, image y downward, no rotation,
   which puts absolute direction 2 at the top of the image.</p>
+
+  <h2>what is in this window</h2>
+  <p class="doc">{{.Distribution.Tiles}} tiles, counted at {{.ReadoutCost}} generator evaluations —
+  a whole tile per cell whatever layer is on screen. The global tests say every terrain is reachable and
+  none dominates; this says what the threshold you just moved did <em>here</em>.
+  Every declared value is listed, including the ones with no tiles, because a row reading zero is usually
+  the row somebody is trying to move off zero.</p>
+  <div class="readout">
+    {{template "ladder" dict "Title" "terrain" "Rows" .Distribution.Terrain "Of" .Distribution.Tiles}}
+    {{template "ladder" dict "Title" "elevation" "Rows" .Distribution.Elevation "Of" .Distribution.Tiles}}
+    {{template "ladder" dict "Title" "heat" "Rows" .Distribution.Heat "Of" .Distribution.Tiles}}
+    {{template "ladder" dict "Title" "moisture" "Rows" .Distribution.Moisture "Of" .Distribution.Tiles}}
+  </div>
 </div>
 <div class="panel">{{template "controls" .}}</div>
+{{end}}
+
+{{define "ladder"}}
+<table class="ladder">
+  <caption>{{.Title}}</caption>
+  {{range .Rows}}
+  <tr{{if eq .Tiles 0}} class="empty"{{end}}>
+    <td>{{.Label}}</td>
+    <td class="num">{{.Tiles}}</td>
+    <td class="num">{{.Percent $.Of}}%</td>
+  </tr>
+  {{end}}
+</table>
 {{end}}
 {{template "layout" .}}

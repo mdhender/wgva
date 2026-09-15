@@ -29,6 +29,25 @@ var templateFuncs = template.FuncMap{
 		}
 		return a * 100 / b
 	},
+	// dict passes several values to one sub-template, which is how the four
+	// readout ladders share a definition instead of being written out four
+	// times. It panics on an odd argument list, which is a template error and
+	// is caught the first time the page is rendered — the tool's own tests
+	// render every tab.
+	"dict": func(pairs ...any) map[string]any {
+		if len(pairs)%2 != 0 {
+			panic("wgva-tune: dict wants key/value pairs")
+		}
+		out := make(map[string]any, len(pairs)/2)
+		for i := 0; i < len(pairs); i += 2 {
+			key, ok := pairs[i].(string)
+			if !ok {
+				panic(fmt.Sprintf("wgva-tune: dict key %v is not a string", pairs[i]))
+			}
+			out[key] = pairs[i+1]
+		}
+		return out
+	},
 }
 
 // Each tab is parsed into its own template set rather than all of them into one.
@@ -79,6 +98,13 @@ type page struct {
 	Label            string
 	IsDefault        bool
 	CreateLine       string
+
+	// Distribution is what is in the window the map tab is drawing, and
+	// ReadoutCost is what counting it cost. The grid tab leaves both empty: a
+	// million tiles of readout is seven million evaluations for a second copy
+	// of work the image already did. See DESIGN.md 29.1.
+	Distribution render.Distribution
+	ReadoutCost  int
 
 	Layers      []link
 	Turns       []link
@@ -215,6 +241,10 @@ func (s *server) newPage(tab string, req request) page {
 	switch tab {
 	case "map":
 		p.ImageURL = base + "/map.png?" + req.view.Query()
+		if vp, err := req.view.Viewport(); err == nil {
+			p.ReadoutCost = vp.Cost()
+			p.Distribution = render.Measure(req.gen, vp)
+		}
 	case "grid":
 		p.ImageURL = base + "/grid.png?" + req.view.Query()
 		for _, stride := range []int{1, 2, 4, 8, 16, 64, 256} {
@@ -332,9 +362,28 @@ func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
+// handleMap draws the map tab: the picture, the controls, and the readout of
+// what is in the window.
+//
+// The page is budgeted, not only the image. The readout costs a whole Tile per
+// cell — seven evaluations whatever layer is on screen — so a page that counted
+// an unbounded window would be the one endpoint in this tool that a careless
+// window size could stall, while every image beside it was refused politely. The
+// refusal names the number and --budget is how it is raised, which is the same
+// answer an oversized image gets. See DESIGN.md 29.1.
 func (s *server) handleMap(w http.ResponseWriter, r *http.Request) {
 	req, ok := s.parse(w, r)
 	if !ok {
+		return
+	}
+	vp, err := req.view.Viewport()
+	if err != nil {
+		renderRefusal(w, err)
+		return
+	}
+	if n := vp.Cost(); n > s.budget {
+		refuse(w, fmt.Errorf("the readout for this window costs %d evaluations, above the budget of %d: "+
+			"a smaller window, or --budget, is how that moves", n, s.budget))
 		return
 	}
 	s.renderPage(w, mapTemplate, s.newPage("map", req))
