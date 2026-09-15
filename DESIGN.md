@@ -2292,7 +2292,7 @@ terrain
 
 Fifteen of those are scalar ramps, `climate` is the two-axis band table, and `terrain` is a vocabulary of swatches — which is why `Layer.Key` returns one of three shapes rather than a ramp with two labels. Four of the ramps are the raw noise scales of section 10 and exist to separate "the noise is wrong" from "the composition is wrong" when a window looks off; nothing in the generator reads them. The `rim` layer draws `RimDistance` and the falloff profile, so the band can be tuned without hunting for the world's edge in the terrain layer.
 
-`Layer.Cost` is the other thing a front end needs from this list: `relief`, `climate`, and `terrain` cost seven generator evaluations a tile because they read the six neighboring elevations, and every other layer costs one. The tuning tool's budget is counted in those, not in tiles.
+`Layer.Cost` is the other thing a front end needs from this list: `relief` and `terrain` cost seven generator evaluations a tile because they read the six neighboring elevations, and every other layer costs one. `climate` is not one of the seven, which is worth saying because it classifies and so looks as though it should be: section 16 gives neither axis a term that reads a neighbor, so the composite reads the elevation scalar at its own tile and nothing around it. The tuning tool's budget is counted in these, not in tiles.
 
 Rendering notes that apply to every front end:
 
@@ -2375,7 +2375,7 @@ What it distorts: a hex row's centers are `sqrt(3) r` apart and a column's are `
 
 Rendering is parallel — goroutines across columns — which is exactly the permission section 20 grants: every cell is a pure function of its own coordinate written to its own slot, so the scheduling split cannot reach the result, and nothing here accumulates across tiles.
 
-**The bound is a budget counted in generator evaluations, not in tiles.** `relief`, `climate`, and `terrain` cost seven evaluations apiece and every other layer costs one, so a tile count could not tell a cheap window from one seven times longer. Over budget is a 400 naming the number, and `--budget` raises it, because measuring how long a large window takes is a thing this tool is for.
+**The bound is a budget counted in generator evaluations, not in tiles.** `relief` and `terrain` cost seven evaluations apiece and every other layer costs one, so a tile count could not tell a cheap window from one seven times longer. Over budget is a 400 naming the number, and `--budget` raises it, because measuring how long a large window takes is a thing this tool is for.
 
 #### The turn
 
@@ -2904,7 +2904,7 @@ Every front end and `wgva-map --grid` logs what each render actually cost — ti
 (1002001 tiles, 405 ms generate, 190 ms encode, 2471232 tiles/s)
 ```
 
-That line is also why the budget in section 29.1 is counted in generator evaluations rather than tiles: `relief`, `climate`, and `terrain` cost seven apiece and every other layer costs one, so a tile count cannot tell a cheap window from one seven times longer. `--budget` raises the bound precisely so that measuring a large window is something these tools can be asked to do.
+That line is also why the budget in section 29.1 is counted in generator evaluations rather than tiles: `relief` and `terrain` cost seven apiece and every other layer costs one, so a tile count cannot tell a cheap window from one seven times longer. `--budget` raises the bound precisely so that measuring a large window is something these tools can be asked to do.
 
 Two figures worth watching separately, because they respond to different changes:
 
@@ -4160,31 +4160,29 @@ down, since each could have gone another way:
 **The rim rule is written and nothing sets its input.** The order is what this
 phase settles; the profile, the flag, and the forced band are phase 7's.
 
-**The `climate` layer costs one evaluation a tile and not seven, and the body
-says both.** Three places cost it at seven — sections 29, 29.1, and 31 — each on
-the grounds that it reads the six neighboring elevations. Section 31.2 says the
-opposite in the course of decomposing a tile: *relief is seven elevation
-evaluations and nothing else; a whole `Tile` is those same seven plus climate,
-basin influence, volcanic tendency, and terrain.* That sentence puts climate as
-work layered on the seven rather than as seven of its own, and it is the one the
-code agrees with.
+**The `climate` layer costs one evaluation a tile, which is what settled a
+disagreement inside the body.** Sections 29, 29.1, and 31 costed it at seven
+until this phase measured it, each on the grounds that it reads the six
+neighboring elevations; section 31.2 had always said the opposite in the course
+of decomposing a tile — *relief is seven elevation evaluations and nothing else;
+a whole `Tile` is those same seven plus climate, basin influence, volcanic
+tendency, and terrain* — which puts climate as work layered on the seven rather
+than as seven of its own.
 
-So this is not the implementation departing from the body. It is the body
-disagreeing with itself, and the implementation landing on the side that is
-right about the model: nothing in section 16 gives either climate axis a term
-that reads a neighbor, so the stated *reason* for the seven is false and not
-merely its arithmetic. Temperature and moisture are both local, and the rain
-shadow D.13 mentions is a statement about the moisture field's wavelength rather
-than about sampling upwind. Only `relief` and `terrain` read the six neighbors.
+What decided it is the model rather than the arithmetic: **section 16 gives
+neither climate axis a term that reads a neighbor.** Temperature and moisture
+are both local, and the rain shadow D.13 mentions is a statement about the
+moisture field's wavelength rather than about sampling upwind. So the *reason*
+the three sentences gave was false and not merely their number, and they now say
+`relief` and `terrain`. Costing climate at seven would have over-charged every
+budget by a factor of seven for work nobody does, and a budget that refuses
+affordable windows is a budget people raise until it stops meaning anything.
 
-Costing climate at seven would over-charge every budget by a factor of seven for
-work nobody does, and a budget that refuses affordable windows is a budget people
-raise until it stops meaning anything. The three sentences that say seven should
-lose climate from their lists; this entry stands until they do, so that a reader
-who finds one of them has somewhere to be sent. **If a later version does give
-climate a term that reads its neighbors, the seven becomes right and this entry
-is what has to go** — which is the ordinary case of an appendix entry describing
-code that has since moved.
+**A later version that does give climate a term reading its neighbors makes the
+seven right again**, and it would have to move the three sentences back and
+delete this entry with them. That is the ordinary way an appendix entry expires,
+and it is worth naming here because the wrong number survived five phases of
+review on the strength of sounding plausible.
 
 *Phase 6.*
 

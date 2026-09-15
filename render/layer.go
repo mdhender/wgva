@@ -290,20 +290,15 @@ func buildLayers() []Layer {
 		Layer{
 			Name: "climate",
 			Doc:  "the two-axis climate classification: which of the twenty-five heat and moisture cells a tile falls in",
-			// One evaluation a tile. DESIGN.md 29, 29.1, and 31 say seven,
-			// and DESIGN.md 31.2 says one — a whole Tile is relief's seven
-			// "plus climate", which is work layered on them rather than seven
-			// of its own. The body disagrees with itself and appendix D.14
-			// records which way it was settled.
+			// One evaluation a tile, and the reason is the model rather than
+			// the arithmetic: nothing in DESIGN.md 16 gives either climate
+			// axis a term that reads a neighbor, so the composite reads the
+			// elevation scalar at this tile and nothing around it. Only relief
+			// and terrain read the six.
 			//
-			// This side of it is the one that is right about the model:
-			// nothing in DESIGN.md 16 gives either climate axis a term that
-			// reads a neighbor, so the composite reads the elevation scalar at
-			// this tile and nothing around it. Only relief and terrain read the
-			// six. Costing climate at seven would over-charge every budget by a
-			// factor of seven for work nobody does, and a budget that refuses
-			// affordable windows is a budget people raise until it stops
-			// meaning anything.
+			// DESIGN.md 29, 29.1, and 31 costed this at seven until phase 6
+			// measured it; appendix D.14 records what settled it and what
+			// would make the seven right again.
 			Cost:   1,
 			key:    climateKey(),
 			sample: climateIndexOf,
