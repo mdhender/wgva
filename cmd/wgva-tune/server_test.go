@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"html"
 	"image/png"
 	"mime/multipart"
 	"net/http"
@@ -509,5 +510,92 @@ func TestMapPageDrawsALargeWindow(t *testing.T) {
 	}
 	if !strings.Contains(body, "what is in this window") {
 		t.Error("the page carries no readout")
+	}
+}
+
+// TestZoomLinksChangeThePicture is the regression test for a pair of controls
+// that did nothing.
+//
+// The zoom links were built once for both tabs and stepped the hex radius, which
+// only the map tab draws with — so on the grid tab they rewrote the address bar
+// and left the image byte for byte identical. A control that does nothing is
+// worse than an absent one: it teaches a person that the thing they wanted is
+// not available.
+func TestZoomLinksChangeThePicture(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	for _, tc := range []struct {
+		tab     string
+		path    string
+		changes string
+	}{
+		{"map", seedPath(), "hex-radius"},
+		{"grid", seedPath() + "/grid", "stride"},
+	} {
+		t.Run(tc.tab, func(t *testing.T) {
+			_, body := get(t, ts, tc.path+"?cols=21&rows=15&scale=2&stride=16&hex-radius=12")
+
+			zoomed := zoomLinks(t, body)
+			if len(zoomed) != 2 {
+				t.Fatalf("the %s tab has %d zoom links, want 2", tc.tab, len(zoomed))
+			}
+			for _, href := range zoomed {
+				u, err := url.Parse(html.UnescapeString(href))
+				if err != nil {
+					t.Fatalf("parsing %q: %v", href, err)
+				}
+				if got := u.Query().Get(tc.changes); got == currentOf(t, tc.changes) {
+					t.Errorf("the %s tab's zoom leaves %s at %s", tc.tab, tc.changes, got)
+				}
+			}
+		})
+	}
+}
+
+// TestGridZoomRedrawsTheImage is the assertion the link-level test cannot make:
+// following the grid tab's zoom link produces a different picture.
+func TestGridZoomRedrawsTheImage(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	const window = "cols=41&rows=31&scale=2&layer=terrain"
+	_, before := get(t, ts, seedPath()+"/grid.png?"+window+"&stride=16")
+	_, after := get(t, ts, seedPath()+"/grid.png?"+window+"&stride=8")
+
+	if before == after {
+		t.Fatal("halving the stride drew the same image; the grid's zoom does nothing")
+	}
+}
+
+// zoomLinks pulls the hrefs of the two zoom controls out of a page.
+func zoomLinks(t *testing.T, body string) []string {
+	t.Helper()
+	var out []string
+	for _, label := range []string{">zoom in<", ">zoom out<"} {
+		i := strings.Index(body, label)
+		if i < 0 {
+			continue
+		}
+		// Walk back to the href of the anchor this label closes.
+		anchor := strings.LastIndex(body[:i], `href="`)
+		if anchor < 0 {
+			t.Fatalf("no href before %s", label)
+		}
+		rest := body[anchor+len(`href="`):]
+		out = append(out, rest[:strings.Index(rest, `"`)])
+	}
+	return out
+}
+
+// currentOf is the value the test's window was requested with.
+func currentOf(t *testing.T, param string) string {
+	t.Helper()
+	switch param {
+	case "hex-radius":
+		return "12"
+	case "stride":
+		return "16"
+	default:
+		t.Fatalf("no current value for %q", param)
+		return ""
 	}
 }

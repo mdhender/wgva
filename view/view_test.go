@@ -295,3 +295,53 @@ func TestViewerDefaults(t *testing.T) {
 		t.Fatal("the viewer's window has no centre cell")
 	}
 }
+
+// TestStridedIsTheGridsZoom pins the inversion. Zooming in lowers the stride,
+// because a smaller stride samples more finely and shows less world — the
+// opposite sense from Zoomed, which is why they are two methods.
+func TestStridedIsTheGridsZoom(t *testing.T) {
+	v := view.Defaults(1)
+	v.Stride = 16
+
+	if got := v.Strided(0.5).Stride; got != 8 {
+		t.Errorf("zooming in from 1:16 gives 1:%d, want 1:8", got)
+	}
+	if got := v.Strided(2).Stride; got != 32 {
+		t.Errorf("zooming out from 1:16 gives 1:%d, want 1:32", got)
+	}
+
+	// Clamped at both ends, and a clamped stride is still a legal one.
+	atFloor := v
+	atFloor.Stride = view.MinStride
+	if got := atFloor.Strided(0.5).Stride; got != view.MinStride {
+		t.Errorf("zooming in at the floor gives 1:%d, want 1:%d", got, view.MinStride)
+	}
+	atCeiling := v
+	atCeiling.Stride = view.MaxStride
+	if got := atCeiling.Strided(2).Stride; got != view.MaxStride {
+		t.Errorf("zooming out at the ceiling gives 1:%d, want 1:%d", got, view.MaxStride)
+	}
+
+	// Nothing else moves. A zoom that also changed the window or the hex radius
+	// would be two controls wearing one label.
+	zoomed := v.Strided(2)
+	zoomed.Stride = v.Stride
+	if zoomed != v {
+		t.Errorf("Strided changed something other than the stride: %+v", zoomed)
+	}
+}
+
+// TestZoomedLeavesTheStrideAlone is the other half, and it is the assertion the
+// grid tab's dead zoom links would have failed: the two zooms touch one
+// parameter each, and not the same one.
+func TestZoomedLeavesTheStrideAlone(t *testing.T) {
+	v := view.Defaults(1)
+	v.Stride = 8
+
+	if got := v.Zoomed(2).Stride; got != 8 {
+		t.Errorf("the map zoom changed the stride to 1:%d", got)
+	}
+	if got := v.Strided(2).HexRadius; got != v.HexRadius {
+		t.Errorf("the grid zoom changed the hex radius to %d", got)
+	}
+}

@@ -215,9 +215,37 @@ func (s *server) newPage(tab string, req request) page {
 		})
 	}
 
-	p.Zoom = []link{
-		{Label: "zoom in", URL: href(req.view.Zoomed(2))},
-		{Label: "zoom out", URL: href(req.view.Zoomed(0.5))},
+	// The two tabs zoom along genuinely different axes, so the links differ.
+	//
+	// On the map, zoom is the hex radius: how large a hex is drawn. On the grid
+	// one cell is one block of pixels whatever happens, so the hex radius means
+	// nothing there — pointing these links at it left the grid tab with two
+	// controls that changed the address bar and not the picture. Zoom on the
+	// grid is the stride, which is the only thing that can change how much world
+	// is on screen.
+	//
+	// Note the inversion: zooming in *lowers* the stride, because a smaller
+	// stride samples more finely and shows less world.
+	if tab == "grid" {
+		p.Zoom = []link{
+			{
+				Label: "zoom in",
+				URL:   href(req.view.Strided(0.5)),
+				Title: strideTitle(req.view.Strided(0.5).Stride),
+			},
+			{
+				Label: "zoom out",
+				URL:   href(req.view.Strided(2)),
+				Title: strideTitle(req.view.Strided(2).Stride),
+			},
+		}
+	} else {
+		p.Zoom = []link{
+			{Label: "zoom in", URL: href(req.view.Zoomed(2)),
+				Title: fmt.Sprintf("%d pixels from a hex's center to a corner", req.view.Zoomed(2).HexRadius)},
+			{Label: "zoom out", URL: href(req.view.Zoomed(0.5)),
+				Title: fmt.Sprintf("%d pixels from a hex's center to a corner", req.view.Zoomed(0.5).HexRadius)},
+		}
 	}
 	for _, size := range []int{11, 41, 101, 301, 601, 1001} {
 		v, _ := req.view.With("cols", fmt.Sprint(size))
@@ -284,6 +312,15 @@ func (s *server) newPage(tab string, req request) page {
 	}
 
 	return p
+}
+
+// strideTitle says what a stride means in hexes, because "1:16" does not say it
+// on its own.
+func strideTitle(stride int) string {
+	if stride == 1 {
+		return "1:1 — every hex sampled"
+	}
+	return fmt.Sprintf("1:%d — one sampled cell every %d hexes", stride, stride)
 }
 
 // scaleOf maps a layer name back to the scale whose tree it draws. Every layer

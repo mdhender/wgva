@@ -271,8 +271,29 @@ func (v View) Scrolled(point string, steps int) View {
 }
 
 // Zoomed returns the view with the hex radius stepped by a factor, clamped.
+//
+// It is the map tab's zoom, and only the map tab's: the hex radius is the pixel
+// radius of a drawn hex and the grid tab draws no hexes. See [View.Strided].
 func (v View) Zoomed(factor float64) View {
 	v.HexRadius = min(max(int(float64(v.HexRadius)*factor+0.5), MinHexRadius), MaxHexRadius)
+	return v
+}
+
+// Strided returns the view with the sampling stride stepped by a factor,
+// clamped.
+//
+// It is the grid tab's zoom, and the two tabs zoom along genuinely different
+// axes. On the map, zooming changes how large a hex is drawn and the window
+// holds the same tiles either way. On the grid, one cell is one block of pixels
+// whatever happens, so the only thing that can change how much world is on
+// screen is how many hexes each sampled cell stands for — which is the stride.
+//
+// Zooming *in* therefore **lowers** the stride, because a smaller stride samples
+// more finely and shows less world. That inversion is why this is a separate
+// method rather than Zoomed with another field name: a caller passing 2 to both
+// and expecting both to zoom in would be wrong about exactly one of them.
+func (v View) Strided(factor float64) View {
+	v.Stride = min(max(int(float64(v.Stride)*factor+0.5), MinStride), MaxStride)
 	return v
 }
 

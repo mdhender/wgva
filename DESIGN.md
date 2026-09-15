@@ -2382,6 +2382,15 @@ The grid can draw a recognizable picture of the *whole world* at a coarse scale,
 
 What it distorts: a hex row's centers are `sqrt(3) r` apart and a column's are `1.5 r`, so drawing both as one pixel stretches the image vertically by about 15% and flattens the half-hex column stagger. That is the price of the view and it is stated on the page.
 
+**Zoom on this tab is the stride, not the pixel scale**, and the two tabs
+therefore zoom along different axes. On the map, zooming changes how large a hex
+is drawn and the window holds the same tiles either way. Here one cell is one
+block of pixels whatever happens, so the only thing that can change how much
+world is on screen is how many hexes each sampled cell stands for. Note the
+inversion that follows: zooming *in* **lowers** the stride, because a smaller
+stride samples more finely and shows less world. A single `Zoomed` serving both
+tabs is a pair of controls that does nothing on this one — see appendix D.18.
+
 Rendering is parallel — goroutines across columns — which is exactly the permission section 20 grants: every cell is a pure function of its own coordinate written to its own slot, so the scheduling split cannot reach the result, and nothing here accumulates across tiles.
 
 **A window's cost is counted in generator evaluations, not in tiles, and it is reported rather than enforced.** `relief` and `terrain` cost seven evaluations apiece and every other layer costs one, so a tile count could not tell a cheap window from one seven times longer. Every tab prints what the window on it costs, and every render logs what it actually took (section 31.1).
@@ -4462,5 +4471,14 @@ The window grammar's clamps stay. They are a different kind of bound — `cols` 
 `rows` are clamped to odd counts inside section 29.3's limits so that a window
 has a centre cell and an absurd request is refused before anything is allocated —
 and they refuse a window for being unrepresentable, never for being slow.
+
+**Zoom means a different parameter on each tab.** Section 29.1's control list
+names zoom once, and the tuning tool built the two links once to match — stepping
+the hex radius, which is the pixel radius of a *drawn hex*. The grid tab draws no
+hexes, so on that tab both links rewrote the address bar and left the image byte
+for byte identical, which is worse than having no zoom at all: a control that
+does nothing teaches a person that the thing they wanted is unavailable. The grid
+zooms by stride, inverted, as 29.1's grid subsection now says. The pixel scale
+there remains a URL parameter with no control, which is a gap and not a decision.
 
 *Phase 8.*
