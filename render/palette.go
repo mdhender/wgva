@@ -9,6 +9,29 @@ import (
 	"github.com/mdhender/wgva"
 )
 
+// RenderVersion identifies the pixels this package produces. A cached image
+// records it, and a binary discards a cache it cannot reproduce.
+//
+// It is a cache-validity counter and not a semantic version. It covers the
+// palettes, the layer table, the hex canvas, and the offset scheme — everything
+// that decides what color a tile is drawn and where. It does **not** cover the
+// world: a change to the generator moves wgva.AlgorithmVersion, and an image is
+// a function of both.
+//
+// Version history:
+//
+//	1  Initial renderer. The seventeen layers, the diagnostic ramps, the climate
+//	   table, the terrain list, the flat-top even-q canvas, and the grid render.
+//
+// Overlay work does not move this. Every pixel the terrain renderer produces is
+// bit-identical to what it produced before overlays existed, and bumping it
+// would claim a cache of terrain PNGs is stale when it is not. Note also what it
+// does not reach: a player image depends on the overlays as well as the palette,
+// and overlays are mutable player state with no version anywhere in the system.
+// That is a reason not to cache one, and it is why a world-backed image carries
+// no entity tag. See DESIGN.md 29.3 and 29.4.
+const RenderVersion uint32 = 1
+
 // RampStop is one anchor of a diagnostic ramp: a position in [0, 1] and the
 // color there.
 type RampStop struct {

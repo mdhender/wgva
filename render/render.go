@@ -192,6 +192,37 @@ func (v Viewport) CoordAt(col, row int) wgva.Coord {
 	return wgva.NewCoord(int64(v.Center.Q())+int64(rel.Q()), int64(v.Center.R())+int64(rel.R()))
 }
 
+// CoordBounds is the smallest rectangle of raw (q, r) values holding every tile
+// of the window.
+//
+// It is what a caller needs to load the player overlays that might fall inside a
+// window, and it is here rather than in a command because two commands need it
+// and the walk is this package's own. It is a rectangle in coordinate space and
+// not the window: for a window that crosses the wrap seam the rectangle is a
+// great deal larger than what is drawn, which is correct rather than merely
+// tolerable — an overlay outside the window is never drawn, so a superset costs
+// a wider range scan and nothing else. See DESIGN.md 29.4.
+//
+// The walk is every cell rather than the border, because wraparound is exactly
+// what makes a border not bound an interior: a window straddling the seam has
+// corners on opposite sides of the map and cells between them that lie outside
+// any box the corners describe.
+func (v Viewport) CoordBounds() (minQ, maxQ, minR, maxR int64) {
+	first := v.CoordAt(0, 0)
+	minQ, maxQ = int64(first.Q()), int64(first.Q())
+	minR, maxR = int64(first.R()), int64(first.R())
+	for row := range v.Rows {
+		for col := range v.Cols {
+			c := v.CoordAt(col, row)
+			minQ = min(minQ, int64(c.Q()))
+			maxQ = max(maxQ, int64(c.Q()))
+			minR = min(minR, int64(c.R()))
+			maxR = max(maxR, int64(c.R()))
+		}
+	}
+	return minQ, maxQ, minR, maxR
+}
+
 // Evaluations is what one window of one layer costs, in generator evaluations.
 //
 // It is counted in evaluations rather than tiles because a tile count cannot
