@@ -7,6 +7,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.4
 	github.com/maloquacious/hexg v1.2.0
 	github.com/maloquacious/semver v0.4.1
+	zombiezen.com/go/sqlite v1.4.2
 )
 
 require (
@@ -22,5 +23,4 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.37.1 // indirect
-	zombiezen.com/go/sqlite v1.4.2 // indirect
 )

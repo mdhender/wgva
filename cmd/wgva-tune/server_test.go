@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"html"
+	"image"
 	"image/png"
 	"mime/multipart"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/mdhender/wgva"
 	"github.com/mdhender/wgva/config"
+	"github.com/mdhender/wgva/render"
 	"github.com/mdhender/wgva/view"
 )
 
@@ -678,4 +680,103 @@ func scrollTo(t *testing.T, body, point string) struct{ q, r int64 } {
 		t.Fatalf("the %s link has r=%q", point, u.Query().Get("r"))
 	}
 	return out
+}
+
+// TestTuneDrawsWhatTheRendererDraws is this front end's share of the claim
+// DESIGN.md 29.3 makes about all three: the CLI and each front end produce
+// identical bytes for the same window.
+//
+// Two front ends over one renderer must not be allowed to drift, and this is one
+// assertion rather than a second set of goldens — render's golden image already
+// pins what the renderer draws, and a second copy of it here would only pin it
+// twice. What is worth asserting is that this tool puts nothing of its own
+// between a window and the pixels. The other two shares are in cmd/wgva-map and
+// cmd/wgva-serve, written the same way against the same function.
+//
+// Both renders are covered, because the two tabs are two walks: the map tab is
+// the hex render and the grid tab is the same walk at a stride with hit testing
+// dropped.
+func TestTuneDrawsWhatTheRendererDraws(t *testing.T) {
+	_, ts := newTestServer(t)
+	gen := wgva.NewDefault(testSeed)
+
+	for _, tc := range []struct {
+		name  string
+		path  string
+		query string
+		grid  bool
+	}{
+		{
+			name:  "the map tab",
+			path:  "/map.png",
+			query: "q=-200&r=-150&cols=41&rows=31&hex-radius=8&layer=terrain",
+		},
+		{
+			name:  "the grid tab",
+			path:  "/grid.png",
+			query: "q=0&r=0&cols=101&rows=71&scale=2&stride=4&layer=elevation",
+			grid:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := get(t, ts, seedPath()+tc.path+"?"+tc.query)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status %d: %s", resp.StatusCode, firstLine(body))
+			}
+
+			q, err := url.ParseQuery(tc.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := view.Parse(view.Defaults(testSeed), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			layer, err := v.RenderLayer()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var want *image.RGBA
+			if tc.grid {
+				vp, err := v.GridViewport()
+				if err != nil {
+					t.Fatal(err)
+				}
+				want, err = render.RenderGrid(gen, vp, layer, v.Scale)
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				vp, err := v.Viewport()
+				if err != nil {
+					t.Fatal(err)
+				}
+				want, err = render.Render(gen, vp, layer, v.HexRadius)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Decoded buffers, not file bytes: image/png's filter and
+			// compression choices can change between Go releases, and what is
+			// being asserted is the picture.
+			got, err := png.Decode(strings.NewReader(body))
+			if err != nil {
+				t.Fatalf("the response is not a PNG: %v", err)
+			}
+			if got.Bounds() != want.Bounds() {
+				t.Fatalf("the image is %v, the renderer's is %v", got.Bounds(), want.Bounds())
+			}
+			for y := want.Bounds().Min.Y; y < want.Bounds().Max.Y; y++ {
+				for x := want.Bounds().Min.X; x < want.Bounds().Max.X; x++ {
+					gr, gg, gb, ga := got.At(x, y).RGBA()
+					wr, wg, wb, wa := want.At(x, y).RGBA()
+					if gr != wr || gg != wg || gb != wb || ga != wa {
+						t.Fatalf("pixel (%d, %d) is not the renderer's", x, y)
+					}
+				}
+			}
+		})
+	}
 }
