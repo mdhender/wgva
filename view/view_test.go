@@ -239,3 +239,59 @@ func TestSeedRoundTrip(t *testing.T) {
 		t.Errorf("ParseSeed of a word returned %v, want ErrNotANumber", err)
 	}
 }
+
+// TestScrollStepsReturnToWhereTheyStarted is the property DESIGN.md 29.3 asks a
+// scroll step for: a step followed by its opposite returns to exactly the
+// coordinate it started from, at every zoom, because the distance is counted in
+// whole hexes and never in pixels.
+func TestScrollStepsReturnToWhereTheyStarted(t *testing.T) {
+	opposites := map[string]string{"N": "S", "S": "N", "NE": "SW", "SW": "NE", "SE": "NW", "NW": "SE"}
+
+	for _, start := range []struct{ q, r int64 }{
+		{0, 0},
+		{-4321, 987},
+		{wgva.WorldRadius, -wgva.WorldRadius},
+		{0, wgva.WorldRadius},
+	} {
+		base := view.ViewerDefaults(1)
+		base.Q, base.R = start.q, start.r
+		for point, back := range opposites {
+			moved := base.Scrolled(point, base.ScrollStep(point))
+			home := moved.Scrolled(back, moved.ScrollStep(back))
+			if home.Q != base.Q || home.R != base.R {
+				t.Errorf("from (%d, %d): %s then %s lands on (%d, %d)",
+					base.Q, base.R, point, back, home.Q, home.R)
+			}
+			if moved.Q == base.Q && moved.R == base.R {
+				t.Errorf("from (%d, %d): %s moved nowhere", base.Q, base.R, point)
+			}
+		}
+	}
+}
+
+// TestScrollStepIsHalfTheWindow pins which half. North and south move rows/2 and
+// the four diagonals move cols/2, both integer division of an odd count.
+func TestScrollStepIsHalfTheWindow(t *testing.T) {
+	v := view.ViewerDefaults(1)
+	for _, point := range []string{"N", "S"} {
+		if got, want := v.ScrollStep(point), v.Rows/2; got != want {
+			t.Errorf("%s steps %d hexes, want %d", point, got, want)
+		}
+	}
+	for _, point := range []string{"NE", "SE", "SW", "NW"} {
+		if got, want := v.ScrollStep(point), v.Cols/2; got != want {
+			t.Errorf("%s steps %d hexes, want %d", point, got, want)
+		}
+	}
+}
+
+// TestViewerDefaults pins the window a saved world opens on.
+func TestViewerDefaults(t *testing.T) {
+	v := view.ViewerDefaults(42)
+	if v.Cols != 61 || v.Rows != 45 || v.HexRadius != 10 || v.Layer != "elevation" {
+		t.Fatalf("ViewerDefaults = %+v", v)
+	}
+	if v.Cols%2 == 0 || v.Rows%2 == 0 {
+		t.Fatal("the viewer's window has no centre cell")
+	}
+}

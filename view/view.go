@@ -101,6 +101,37 @@ func Defaults(seed wgva.Seed) View {
 	}
 }
 
+// ViewerDefaults returns the window the map viewer opens on.
+//
+// They differ from the tuning tool's on two counts, and both are about what the
+// tool is for. The window is larger, because the viewer is looking at a world
+// rather than at one field of it; and the layer is the elevation scalar rather
+// than the coarsest noise scale, because somebody opening a saved world wants to
+// see land and water, not the composition behind them. See DESIGN.md 29.3.
+func ViewerDefaults(seed wgva.Seed) View {
+	v := Defaults(seed)
+	v.Cols, v.Rows = 61, 45
+	v.HexRadius = 10
+	v.Layer = "elevation"
+	return v
+}
+
+// ScrollStep is how far one click of a compass control moves the viewer, in
+// whole hexes.
+//
+// **Scroll distances are whole hexes**, counted in tiles and never in pixels, so
+// a step means the same thing at every zoom and a step followed by its opposite
+// returns to exactly the coordinate it started from. North and south move
+// rows/2; the four diagonals move cols/2. Both are integer division of an odd
+// count, and opposite points get the same distance, which is what makes the
+// round trip exact rather than nearly exact. See DESIGN.md 29.3.
+func (v View) ScrollStep(point string) int {
+	if strings.EqualFold(point, "N") || strings.EqualFold(point, "S") {
+		return max(v.Rows/2, 1)
+	}
+	return max(v.Cols/2, 1)
+}
+
 // Parse applies the query parameters that are present to base and returns the
 // result. Absent parameters keep base's value, which is what makes every control
 // a link that changes one thing.

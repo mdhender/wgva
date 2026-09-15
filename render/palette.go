@@ -42,6 +42,25 @@ var SignedRamp = Ramp{
 // against whatever the viewer composites onto.
 var Background = color.RGBA{R: 0x14, G: 0x14, B: 0x16, A: 0xff}
 
+// The player overlay palette. These three are the only colors a player render
+// adds, and they are deliberately outside every terrain and every ramp: a fog
+// that could be mistaken for ocean, or a settlement that could be mistaken for
+// a volcano, would be a map that lied by resembling something.
+var (
+	// Fog is an undiscovered tile. It replaces the terrain color for every
+	// layer identically, because a fogged tile that leaked its heat band would
+	// be a map telling the player the climate of ground they have never seen.
+	Fog = color.RGBA{R: 0x2b, G: 0x2d, B: 0x33, A: 0xff}
+
+	// Settlement is a place the player built. It is drawn whether or not the
+	// tile under it is discovered; hiding it would be the map lying to its
+	// owner.
+	Settlement = color.RGBA{R: 0xf2, G: 0xe8, B: 0xd5, A: 0xff}
+
+	// Label is a place the player named.
+	Label = color.RGBA{R: 0xf0, G: 0xc6, B: 0x74, A: 0xff}
+)
+
 // At returns the color at t, clamped to [0, 1].
 //
 // The interpolation is linear in sRGB. That is not perceptually even, and for a

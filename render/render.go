@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"runtime"
 	"sync"
@@ -248,11 +249,38 @@ func normalize(k Key, value float64) float64 {
 // would be, it leaves no seams between neighbors and no double-painted edges,
 // and it keeps the output independent of the order the cells are visited.
 func Render(g *wgva.Generator, v Viewport, l Layer, hexRadius int) (*image.RGBA, error) {
+	canvas, err := newHexCanvas(v, hexRadius)
+	if err != nil {
+		return nil, err
+	}
+
+	values := sampleCells(g, v, l)
+	key := l.Key()
+	return canvas.fill(v, func(col, row int) color.RGBA {
+		return colorOf(key, values[row*v.Cols+col])
+	}), nil
+}
+
+// hexCanvas is the pixel geometry of one hex window: where the window's cells
+// land and how big the image has to be.
+//
+// It is separate from Render because RenderPlayer draws the same mosaic with a
+// different rule about what color a cell gets and then paints on top of it. Two
+// copies of the geometry would be two chances to get the layout's offset wrong,
+// and a mirrored layout keeps every golden pixel passing while sending every
+// printed heading the wrong way.
+type hexCanvas struct {
+	layout        hexg.Layout
+	hexRadius     int
+	width, height int
+}
+
+func newHexCanvas(v Viewport, hexRadius int) (hexCanvas, error) {
 	if hexRadius < 1 || hexRadius > MaxHexRadi {
-		return nil, &RenderError{What: "hex-radius", Value: hexRadius, Lo: 1, Hi: MaxHexRadi, Err: ErrPixelScale}
+		return hexCanvas{}, &RenderError{What: "hex-radius", Value: hexRadius, Lo: 1, Hi: MaxHexRadi, Err: ErrPixelScale}
 	}
 	if v.Stride != 1 {
-		return nil, &RenderError{What: "stride", Value: v.Stride, Lo: 1, Hi: 1, Err: ErrStride}
+		return hexCanvas{}, &RenderError{What: "stride", Value: v.Stride, Lo: 1, Hi: 1, Err: ErrStride}
 	}
 
 	r := float64(hexRadius)
@@ -270,26 +298,45 @@ func Render(g *wgva.Generator, v Viewport, l Layer, hexRadius int) (*image.RGBA,
 		minY, maxY = min(minY, p.Y-halfHeight), max(maxY, p.Y+halfHeight)
 	}
 
-	layout := hexg.NewLayout(hexg.EvenQ, hexg.Point{X: r, Y: r}, hexg.Point{X: -minX, Y: -minY})
-	width := int(math.Ceil(maxX - minX))
-	height := int(math.Ceil(maxY - minY))
+	return hexCanvas{
+		layout:    hexg.NewLayout(hexg.EvenQ, hexg.Point{X: r, Y: r}, hexg.Point{X: -minX, Y: -minY}),
+		hexRadius: hexRadius,
+		width:     int(math.Ceil(maxX - minX)),
+		height:    int(math.Ceil(maxY - minY)),
+	}, nil
+}
 
-	values := sampleCells(g, v, l)
-	key := l.Key()
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
+// centerOf is where one cell's hex center lands, in pixels. It is what a marker
+// is drawn around; the mosaic itself needs no such thing, because it is drawn by
+// hit testing from the other direction.
+func (hc hexCanvas) centerOf(col, row int) image.Point {
+	p := hc.layout.HexToPixel(hc.layout.OffsetToCube(hexg.NewOffsetCoord(col, row)))
+	return image.Point{X: int(p.X), Y: int(p.Y)}
+}
 
-	workers := min(runtime.GOMAXPROCS(0), height)
+// fill paints the mosaic, asking colorAt what each cell is worth.
+//
+// It is drawn by hit testing rather than by filling polygons: every pixel is
+// converted back to the cell that contains it and painted that cell's color.
+// That is the one thing hexg's layout is genuinely better at than we would be,
+// it leaves no seams between neighbors and no double-painted edges, and it keeps
+// the output independent of the order the cells are visited — which is also what
+// makes the goroutine split below unable to reach a pixel.
+func (hc hexCanvas) fill(v Viewport, colorAt func(col, row int) color.RGBA) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, hc.width, hc.height))
+
+	workers := min(runtime.GOMAXPROCS(0), hc.height)
 	var wg sync.WaitGroup
 	for w := range workers {
 		wg.Go(func() {
-			for y := w; y < height; y += workers {
-				for x := range width {
-					oc := layout.CubeToOffset(layout.PixelToHexRounded(
+			for y := w; y < hc.height; y += workers {
+				for x := range hc.width {
+					oc := hc.layout.CubeToOffset(hc.layout.PixelToHexRounded(
 						hexg.Point{X: float64(x) + 0.5, Y: float64(y) + 0.5},
 					))
 					c := Background
 					if oc.Col >= 0 && oc.Col < v.Cols && oc.Row >= 0 && oc.Row < v.Rows {
-						c = colorOf(key, values[oc.Row*v.Cols+oc.Col])
+						c = colorAt(oc.Col, oc.Row)
 					}
 					img.SetRGBA(x, y, c)
 				}
@@ -297,7 +344,7 @@ func Render(g *wgva.Generator, v Viewport, l Layer, hexRadius int) (*image.RGBA,
 		})
 	}
 	wg.Wait()
-	return img, nil
+	return img
 }
 
 // borderCells returns the offset cells on the window's border, in a fixed order.
