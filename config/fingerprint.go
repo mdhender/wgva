@@ -13,9 +13,11 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/mdhender/wgva"
@@ -38,6 +40,25 @@ func (d Digest) Short() string { return hex.EncodeToString(d[:4]) }
 // through hundreds of configurations under otherwise identical URLs and a
 // four-byte tag would start colliding inside one afternoon. See DESIGN.md 29.1.
 func (d Digest) Tag() string { return hex.EncodeToString(d[:8]) }
+
+// ErrDigestSpelling is returned for text that is not a fingerprint.
+var ErrDigestSpelling = errors.New("fingerprint must be sixty-four hexadecimal digits")
+
+// ParseDigest reads a fingerprint written in full hex.
+//
+// It exists for the one caller that reads a fingerprint back out of a world
+// file. Comparing the stored text to a computed String() would work and would
+// also silently accept a value that is not a fingerprint at all, so the text is
+// parsed and the two digests are compared as values.
+func ParseDigest(text string) (Digest, error) {
+	raw, err := hex.DecodeString(strings.TrimSpace(strings.ToLower(text)))
+	if err != nil || len(raw) != sha256.Size {
+		return Digest{}, fmt.Errorf("%q: %w", text, ErrDigestSpelling)
+	}
+	var d Digest
+	copy(d[:], raw)
+	return d, nil
+}
 
 // canonicalEncoding is CBOR in canonical/deterministic mode.
 //

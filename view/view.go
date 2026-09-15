@@ -325,27 +325,20 @@ func (v View) With(param, value string) (View, error) {
 	return Parse(v, url.Values{param: []string{value}})
 }
 
-// ParseSeed reads a seed written in decimal or, with an 0x prefix, in hex.
+// ParseSeed reads a seed in any spelling wgva.ParseSeed accepts and turns a
+// refusal into a view refusal, because a seed arrives here as a route segment
+// somebody typed.
 //
-// A seed is the one number in this grammar that people copy between a browser,
-// a terminal, and a commit message, so both spellings are accepted and the hex
-// one is what the tool prints: a world identified as 0x0123456789abcdef is
-// recognizable at a glance in a way that its decimal expansion is not.
+// The grammar itself is the core package's, not this one's. A seed is not window
+// grammar, and cmd/wgva-world needs to read one without importing render — which
+// this package does. See wgva.ParseSeed.
 func ParseSeed(text string) (wgva.Seed, error) {
-	text = strings.TrimSpace(text)
-	if lower := strings.ToLower(text); strings.HasPrefix(lower, "0x") {
-		n, err := strconv.ParseUint(lower[2:], 16, 64)
-		if err != nil {
-			return 0, &ViewError{Param: "seed", Value: text, Err: ErrNotANumber}
-		}
-		return wgva.Seed(n), nil
-	}
-	n, err := strconv.ParseUint(text, 10, 64)
+	seed, err := wgva.ParseSeed(text)
 	if err != nil {
-		return 0, &ViewError{Param: "seed", Value: text, Err: ErrNotANumber}
+		return 0, &ViewError{Param: "seed", Value: strings.TrimSpace(text), Err: ErrNotANumber}
 	}
-	return wgva.Seed(n), nil
+	return seed, nil
 }
 
 // FormatSeed renders a seed the way the tool prints it.
-func FormatSeed(s wgva.Seed) string { return fmt.Sprintf("0x%016x", uint64(s)) }
+func FormatSeed(s wgva.Seed) string { return s.String() }

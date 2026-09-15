@@ -308,6 +308,17 @@ func normalize(q, r int64) (int64, int64) {
 	return q, r
 }
 
+// IsCanonical reports whether an axial pair names a tile of this world: every
+// one of q, r, and s within +/-WorldRadius.
+//
+// It is exported for the one caller that must ask the question without
+// answering it. SQLite columns hold anything, so a stored (q, r) outside the
+// domain is malformed data rather than a distant tile, and passing it through
+// NewCoord would silently relocate a player's settlement to a real coordinate
+// somewhere else. store asks this and refuses; nothing repairs. See DESIGN.md
+// 27.6 and 4.1.
+func IsCanonical(q, r int64) bool { return isCanonical(q, r) }
+
 // isCanonical reports whether the axial pair lies in the canonical hexagon. It
 // checks q and r before deriving s so that the derivation cannot overflow.
 func isCanonical(q, r int64) bool {
