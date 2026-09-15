@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wgva-serve — {{.SeedText}} — {{.View.Layer}}</title>
+<style>
+:root { color-scheme: dark; }
+body { margin: 0; background: #16181c; color: #d8dade; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+header { padding: 12px 18px; background: #0f1114; border-bottom: 1px solid #2a2e35; }
+h1 { font-size: 15px; margin: 0 0 6px; font-weight: 600; letter-spacing: 0.02em; }
+h2 { font-size: 13px; margin: 18px 0 6px; color: #9aa1ab; text-transform: uppercase; letter-spacing: 0.08em; }
+main { padding: 18px; display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.panel { min-width: 280px; max-width: 420px; flex: 0 0 auto; }
+.picture { flex: 1 1 520px; min-width: 320px; }
+a { color: #7fb4e8; }
+a.current { color: #f0c674; font-weight: 700; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.identity { display: flex; gap: 22px; flex-wrap: wrap; font-size: 12px; color: #9aa1ab; }
+.identity b { color: #d8dade; font-weight: 600; }
+.label-default { color: #86c27a; font-weight: 700; }
+.label-modified { color: #f0c674; font-weight: 700; }
+.caveat { margin: 6px 0 0; font-size: 12px; color: #7c828c; max-width: 80ch; }
+.warning { margin: 10px 0; padding: 8px 10px; border-left: 3px solid #f0c674; background: #201d15; font-size: 12px; max-width: 80ch; }
+img { image-rendering: pixelated; border: 1px solid #2a2e35; background: #0f1114; max-width: 100%; }
+table { border-collapse: collapse; font-size: 12px; }
+td, th { padding: 3px 10px 3px 0; text-align: left; vertical-align: top; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.doc { color: #7c828c; }
+input[type=text] { background: #0f1114; color: #d8dade; border: 1px solid #2a2e35; padding: 3px 5px; font: inherit; width: 12ch; }
+input[type=submit] { background: #23272e; color: #d8dade; border: 1px solid #3a3f48; padding: 4px 10px; font: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+<h1>the map viewer — it looks at a world that is already saved, and never writes to one</h1>
+<div class="identity">
+  <span>seed <b>{{.SeedText}}</b></span>
+  <span>build <b>{{.Build}}</b></span>
+  <span>algorithm version <b>{{.AlgorithmVersion}}</b></span>
+  <span>render version <b>{{.RenderVersion}}</b></span>
+  <span>page version <b>{{.PageVersion}}</b></span>
+  <span>world radius <b>{{.WorldRadius}}</b></span>
+  <span>configuration <b title="{{.Fingerprint}}">{{.FingerprintShort}}</b>
+    <span class="label-default">{{.ConfigLabel}}</span></span>
+</div>
+{{if .Diagnostic}}
+<p class="warning"><b>Diagnostic.</b> No world is saved. This server was started without
+<code>--db</code>, so the generator is built in memory from the seed in the route and this binary's
+defaults, and <em>what you are looking at does not represent a saved world</em>. Every seed is
+servable here, which is what makes this useful for sampling. <code>wgva-world create</code> is what
+turns one of them into a world.</p>
+{{else}}
+<p class="caveat">world <b>{{.World}}</b>, created by <b>{{.CreatedBy}}</b> on {{.CreatedAt}}.
+This server opens and never writes; the player overlays are read fresh from the file on every
+request, so exploring a world and refreshing shows the exploration.</p>
+{{end}}
+</header>
+
+<main>
+<div class="panel">
+
+<h2>layer</h2>
+<div class="row">{{range .Layers}}<a href="{{.URL}}" title="{{.Title}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}</div>
+{{if .LayerDoc}}<p class="doc">{{.LayerDoc}}</p>{{end}}
+
+<h2>move — the compass runs clockwise from north</h2>
+<div class="row">{{range .Scroll}}<a href="{{.URL}}" title="{{.Title}}">{{.Label}}</a>{{end}}</div>
+<p class="doc">A step is a third of the window, counted in whole hexes and never in pixels, so it
+means the same thing at every zoom and a step followed by its opposite returns to exactly the
+coordinate it started from.</p>
+
+<h2>window</h2>
+<div class="row">{{range .Size}}<a href="{{.URL}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}</div>
+<div class="row">{{range .Zoom}}<a href="{{.URL}}">{{.Label}}</a>{{end}}</div>
+
+<h2>turn</h2>
+<div class="row">{{range .Turns}}<a href="{{.URL}}"{{if .Current}} class="current"{{end}}>{{.Label}}</a>{{end}}</div>
+
+<h2>go to</h2>
+<form method="get" action="">
+  <input type="hidden" name="layer" value="{{.View.Layer}}">
+  <input type="hidden" name="cols" value="{{.View.Cols}}">
+  <input type="hidden" name="rows" value="{{.View.Rows}}">
+  <input type="hidden" name="turn" value="{{.View.Turn}}">
+  <input type="hidden" name="hex-radius" value="{{.View.HexRadius}}">
+  <input type="hidden" name="scale" value="{{.View.Scale}}">
+  <input type="hidden" name="stride" value="{{.View.Stride}}">
+  q <input type="text" name="q" value="{{.View.Q}}">
+  r <input type="text" name="r" value="{{.View.R}}">
+  <input type="submit" value="go">
+</form>
+<p class="doc">Coordinates are canonical, not player-relative. This viewer has no player, so a link
+means the same tile to everybody who opens it, and it is the same number <code>wgva-map --q --r</code>
+takes — a window moves between the two tools without a conversion.</p>
+
+<h2>cost</h2>
+<p class="doc">{{.Tiles}} tiles, {{.Evaluations}} generator evaluations for this image. Nothing here
+is a limit; what each render actually took is logged to the console as it is served.</p>
+
+</div>
+
+<div class="picture">
+<img src="{{.ImageURL}}" alt="the window at {{.View.Q}}, {{.View.R}}, layer {{.View.Layer}}">
+
+<h2>the tile at the centre</h2>
+<table>
+<tr><th>coordinate</th><td>q {{.Centre.Coord.Q}}, r {{.Centre.Coord.R}}, s {{.Centre.S}}</td></tr>
+<tr><th>terrain</th><td>{{.Centre.Terrain}}</td></tr>
+<tr><th>elevation</th><td>{{.Centre.Elevation}}</td><td class="num">{{printf "%+.4f" .Centre.ElevationValue}}</td></tr>
+<tr><th>heat</th><td>{{.Centre.Heat}}</td><td class="num">{{printf "%+.4f" .Centre.HeatValue}}</td></tr>
+<tr><th>moisture</th><td>{{.Centre.Moisture}}</td><td class="num">{{printf "%+.4f" .Centre.MoistureValue}}</td></tr>
+<tr><th>relief</th><td></td><td class="num">{{printf "%.4f" .Centre.ReliefValue}}</td></tr>
+<tr><th>rim</th><td>{{if .Centre.Rim}}inside the closed band — forced terrain{{else}}open{{end}}</td>
+    <td class="num">{{.Centre.RimHexes}} hexes from the edge</td></tr>
+</table>
+<p class="doc">The page names the tile it is centred on, not only the coordinate. A link to a window
+is otherwise a link to a picture, and a reader has to count swatches against the key to find out what
+they are looking at. It costs one tile against the {{.Tiles}} the image above it costs.</p>
+</div>
+</main>
+</body>
+</html>
