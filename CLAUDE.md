@@ -4,17 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-**Phases 1 through 7 have landed.** The root `wgva` package carries coordinates,
-the wraparound normalizer, hashing, the owned noise, the `Field` composition tree
-with fbm and domain warping, the region anchors and their barycentric blend, the
-elevation composite with its ridge structure and land/water classification, the
-two-axis climate composite with its broad zone fields and elevation lapse rate,
-the basin composite and the volcanic tendency, the ordered terrain classifier,
-the rim profile, `Tile`, and the `Config`/`Generator` skeleton; `internal/mathx`
+**Phases 1 through 8 have landed, and there is no phase 9.** The root `wgva`
+package carries coordinates, the wraparound normalizer, hashing, the seed
+grammar, the owned noise, the `Field` composition tree with fbm and domain
+warping, the region anchors and their barycentric blend, the elevation composite
+with its ridge structure and land/water classification, the two-axis climate
+composite with its broad zone fields and elevation lapse rate, the basin
+composite and the volcanic tendency, the ordered terrain classifier, the rim
+profile, `Tile`, the batch API, and `Config`/`Generator`; `internal/mathx`
 carries the floor helpers, `Mul`, and the exact 128-bit arithmetic. Around it,
-`config` owns the canonical CBOR, the fingerprint, and the TOML file; `render`
-owns the viewport, all seventeen layers, and the two renders; `view` owns the
-window grammar; and `cmd/wgva-tune` is the terrain tuning tool.
+`config` owns the canonical CBOR, the fingerprint, the TOML file, and the
+`<build>/<fingerprint>` identity pair; `render` owns the viewport, all seventeen
+layers, the three renders, the player frame, the overlays, and the distribution
+readout; `view` owns the window grammar; `store` owns the single-world SQLite
+file, the migration ladder, and the seven opening gates; and the four commands
+are the terrain tuning tool, the world builder, the map renderer, and the map
+viewer.
 
 **The defaults are settled.** `config/fingerprint_test.go` carries the
 written-down fingerprint of the default configuration, so moving any default
@@ -22,11 +27,20 @@ fails a test; updating that constant is a compatibility decision and belongs in
 the commit message beside the `AlgorithmVersion` bump. `DESIGN.md` appendices
 D.11, D.13, D.15, and D.17 are what each group was tuned to.
 
-What does not exist yet is everything from phase 8 on: every `store` or
-player-facing thing. **Inland water is declared and deliberately emitted
-nowhere** — `DESIGN.md` 17.1 is the decision record, `TerrainInlandSea` and
-`TerrainLake` keep their numbers, and the distribution test asserts both stay at
-zero. Of the region parameters only the variation is still unread.
+**Worlds exist now, so `AlgorithmVersion` is close to costing what `DESIGN.md`
+section 27 says it costs.** `AGENTS.md`, *Alpha workflow*, relaxes that during
+alpha because there were no worlds anybody wanted to keep. The first world
+somebody is unwilling to throw away is when that stops being true; say so in the
+commit that leaves alpha and delete the subsection then.
+
+**Inland water is declared and deliberately emitted nowhere** — `DESIGN.md` 17.1
+is the decision record, `TerrainInlandSea` and `TerrainLake` keep their numbers,
+and the distribution test asserts both stay at zero. Of the region parameters
+only the variation is still unread.
+
+**There is no tile cache and building one is not deferred work.** WGVB measured
+and the answer was no; `DESIGN.md` 27.6 is the record, and a world file holds a
+metadata row, the player frames, and the sparse overlays and nothing else.
 
 The golden tables in `golden_test.go` are recorded with the **rim switched off**,
 and `DESIGN.md` appendix D.16 is why: eight of their coordinates are the rim's own
@@ -34,20 +48,22 @@ corners, a zero rim is the shipped world bit for bit everywhere the band does no
 reach, and `TestGoldenRim` is where the shipped band's arithmetic is recorded
 instead. Do not "fix" that by re-recording them under the default rim.
 
-The batch API of `DESIGN.md` 20 and the distribution readout of 29.1 are both
-written and unbuilt. Both want a caller, and the caller is phase 8.
+`DESIGN.md` is the specification and `AGENTS.md` is the working guidance. The
+code has caught up with both, which changes what a disagreement means: it is now
+more likely to be documentation the implementation moved past than a gap left to
+fill. Read `DESIGN.md` appendix D first — D.18 and D.19 record what the front
+ends and persistence settled, and an appendix entry is behind the code by
+construction and outranks the body where it speaks. Where no appendix entry
+covers it, still treat the disagreement as a gap to fill rather than drift to
+correct, and write the entry when you settle it.
 
-`DESIGN.md` is the specification and `AGENTS.md` is the working guidance, and
-both are still well ahead of the code. Treat a disagreement between them and the
-code as a gap to fill, not as documentation drift to correct — except where
-`DESIGN.md` appendix D says otherwise, which records what the implementation
-settled and is behind the code by construction.
-
-`DESIGN.md` section 32 is the build order, and it is deliberate: coordinates and
-hashing, then fields **and the terrain tuning tool**, then regions, elevation,
-climate, terrain, the rim, and only then persistence and anything player-facing.
-Do not start with the database or a one-shot renderer because they look
-foundational.
+`DESIGN.md` section 32 was the build order and it paid for itself: coordinates
+and hashing, then fields **and the terrain tuning tool**, then regions,
+elevation, climate, terrain, the rim, and only then persistence and anything
+player-facing. Six phases of deciding what worlds look like happened with no
+database in the loop. Keep it in mind for whatever comes next — the temptation to
+start with storage because it looks foundational is what the order exists
+against.
 
 @AGENTS.md
 
@@ -62,6 +78,26 @@ go test -race ./...              # anything touching goroutines
 go test -run TestNormalize ./...            # one test by name
 go test -run 'TestRim/falloff' ./...        # one subtest
 go test -bench . -run '^$' ./...            # benchmarks only, no tests
+```
+
+The four tools, and what each one can touch. See `AGENTS.md`, *Naming, outside
+the repository*, for what to call them when project management is listening.
+
+```sh
+# decide how worlds look — cannot open or create a world
+go run ./cmd/wgva-tune --seed 0x0123456789abcdef
+
+# what --expect takes, and the world it makes
+go run ./cmd/wgva-world identity
+go run ./cmd/wgva-world create --seed <hex> --expect <build>/<fingerprint> world.wgva
+go run ./cmd/wgva-world inspect world.wgva
+
+# one window to one image file — cannot create or modify a world
+go run ./cmd/wgva-map --db world.wgva --q 0 --r 0 --layer terrain --out map.png
+go run ./cmd/wgva-map --seed <hex> --grid --stride 8 --out grid.png    # diagnostic
+
+# look at a saved world — opens, never writes
+go run ./cmd/wgva-serve --db world.wgva
 ```
 
 Goldens must pass on both architectures, because the FMA hazard in `DESIGN.md`

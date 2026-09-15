@@ -4482,3 +4482,97 @@ zooms by stride, inverted, as 29.1's grid subsection now says. The pixel scale
 there remains a URL parameter with no control, which is a gap and not a decision.
 
 *Phase 8.*
+
+---
+
+### D.19 What persistence settled
+
+Phase 8 is the first phase with a file format to be careful about, and five
+things in section 27 turned out to be written before the code that had to
+satisfy them. None of them changes a generated value; two of them change a name,
+two change a mechanism, and one is a gap the body left open.
+
+**Gate 5's sentinel is `ErrWrongWorldRadius`.** Section 27.5's code block spells
+it `ErrWrongComponentWidth` and gives it the message *"world was generated at a
+different coordinate width"*. That naming is left over from when the radius was
+forced to be a storage type's maximum and the two were one fact; section 4.2
+separated them, and the prose in 27.5 immediately below the block already says
+*"Gate 5 rejects a world generated at a different world radius"*. `AGENTS.md` is
+explicit that anything identifying a world records `WorldRadius` and never a
+width in bits — `100000` and `131071` are different worlds and both are eighteen
+bits. The gate is the one 27.5 describes; only the name follows the prose rather
+than the code block.
+
+**Gate 3 runs the ladder only when the ladder has something to do, and the
+application pool is `sqlitex`'s rather than `sqlitemigration`'s.** This is not an
+optimization. `sqlitemigration.Migrate` writes `PRAGMA application_id`
+unconditionally inside a savepoint, so its pool commits a write transaction on
+every connection it opens — including for a file whose schema is already current.
+Two bytes of the header move, every open. Three things follow and each of them
+matters more than the write does: `wgva-map` and `wgva-serve` are documented as
+opening a world and not writing to it, a world file on read-only media would
+fail to open at all, and — most usefully — the assertion that a *refused* open
+leaves the file byte for byte identical is only worth making if a *permitted*
+open does too. Section 27.4's rule is kept: the ladder is still
+`sqlitemigration`'s, the version is pinned, and section 30.11's tests are what
+stop it moving because a dependency did.
+
+**Gates 1 and 2 run on a read-only connection.** Section 27.5 says no gate may
+perform an application write before it passes, which is a rule somebody has to
+keep obeying. Opening the file `SQLITE_OPEN_READONLY` for the two gates that
+precede the migration makes it a property of the code instead: those gates
+cannot write, whatever a later edit does to the body, and a read-only connection
+also cannot be talked into running the ladder early — which is the ordering
+error the pair exists to prevent.
+
+**The stored configuration is the TOML file, not the canonical CBOR.** Section
+27 says the metadata holds the "complete effective generator configuration" and
+does not say in what. TOML is what appendix C's inspectability argument asks for
+— a world's configuration is a `SELECT` away in the `sqlite3` CLI — and it is
+already the format whose decoding rules refuse a missing key *by name* rather
+than defaulting it to zero, which is the hazard of section 21.1 and the thing an
+older binary must do with a newer world. The CBOR is still what the fingerprint
+hashes, and gate 6 recomputes the fingerprint from the decoded configuration
+rather than comparing stored text, so a tampered configuration is caught by the
+value it produces and not by the bytes it was written in.
+
+**`--expect`'s pair is a type in `config`, and the seed grammar is in `wgva`.**
+Section 29.5 describes `<build>/<fingerprint>` as a flag's format. It is parsed,
+rendered, and compared in three places — the tuning tool emits it, the world
+builder consumes it, and both have tests — and those two commands share only
+`wgva` and `config`, because `cmd/wgva-tune` must never reach `store`. So the
+pair is `config.Identity`. The seed is the same argument one level down:
+`cmd/wgva-world` must never import `render`, `view` imports `render`, and a seed
+parser written to dodge that edge would be a second opinion about what a seed
+is. `wgva.ParseSeed` and `Seed.String()` are the grammar; `view.ParseSeed` wraps
+them so a malformed query parameter still earns a view refusal. Both accept the
+bare sixteen hexadecimal digits 29.3 writes in a route segment and the `0x`
+form every tool prints, which is how the CLI got taught the hex spelling 29.3
+asks for.
+
+**`cmd/wgva-map` takes its window from `view`.** Section 28's dependency map does
+not give the map renderer a `view` edge, and section 29.2 lists its flags as
+though they were the command's own. They are not: each window flag is the
+viewer's query parameter of the same name, collected as the text a caller wrote
+and handed to `view.Parse`. A flag a caller did not set has to keep the default
+exactly as an absent query parameter does — a CLI that passed all nine values
+every time could not *have* a default — and the alternative is a second parser
+with a second opinion about what `cols=400` means. It is also what makes
+section 29.3's *"the CLI and each front end produce identical bytes for the same
+window"* one assertion against `render` in each front end rather than a second
+set of goldens. The edge is `cmd/wgva-map -> view -> render`, which no rule
+forbids; the two edges that are forbidden have tests.
+
+One note on section 29.2's example, which asks for `--cols 400 --rows 300`. A
+window needs a centre cell, so the grammar clamps an even count up to an odd one
+rather than refusing it, and that example draws a 401 by 301 window.
+
+**`Viewport.CoordBounds` walks every cell.** Loading the overlays that might fall
+in a window needs the smallest `(q, r)` rectangle holding its tiles, and the
+obvious implementation walks the border. Wraparound is exactly what makes that
+wrong: a window straddling the seam has corners on opposite sides of the map and
+cells between them that lie outside any box the corners describe. The full walk
+allocates nothing and costs a coordinate normalization per cell, against a render
+that costs a field evaluation per cell.
+
+*Phase 8.*
