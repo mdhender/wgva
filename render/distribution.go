@@ -55,10 +55,10 @@ type Distribution struct {
 //
 // It is a whole Tile per cell whatever layer is on screen, which is seven
 // evaluations, because a Tile reads the six neighboring elevations. So a page
-// that shows a readout beside an image goes through the evaluation budget twice
-// over, and the grid tab shows no readout at all: a million tiles of readout is
-// seven million evaluations for a second copy of work the image already did. See
-// DESIGN.md 29.1.
+// that shows a readout beside an image pays for the window twice, and the grid
+// tab shows no readout at all: a million tiles of readout is seven million
+// evaluations for a second copy of work the image already did. The number is
+// printed on the page that spends it. See DESIGN.md 29.1.
 func (v Viewport) Cost() int { return v.Cols * v.Rows * TileCost }
 
 // TileCost is how many generator evaluations one whole Tile takes. It is the

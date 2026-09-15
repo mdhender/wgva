@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"log"
 	"net/http"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/mdhender/wgva"
 	"github.com/mdhender/wgva/config"
@@ -33,7 +35,6 @@ import (
 // What it keeps is the fingerprint. See DESIGN.md 29.1.
 type server struct {
 	defaultSeed wgva.Seed
-	budget      int
 
 	// mu guards cfg. It is a mutex on a *tool*, not on a Generator: a Generator
 	// is immutable and is built fresh from a snapshot of cfg per request, so
@@ -47,10 +48,9 @@ type server struct {
 	renders chan struct{}
 }
 
-func newServer(seed wgva.Seed, cfg wgva.Config, budget int) *server {
+func newServer(seed wgva.Seed, cfg wgva.Config) *server {
 	return &server{
 		defaultSeed: seed,
-		budget:      budget,
 		cfg:         cfg,
 		renders:     make(chan struct{}, runtime.GOMAXPROCS(0)),
 	}
@@ -144,6 +144,33 @@ func (s *server) withRender(fn func() (*image.RGBA, error)) (*image.RGBA, error)
 	return fn()
 }
 
+// renderCost is what one render actually cost.
+//
+// It is the line DESIGN.md 31.1 asks every front end to log, and it is what
+// stands where an evaluation budget used to: nothing refuses a window for being
+// expensive, so what an administrator gets instead is the measurement. Generate
+// and encode are separated because they move for different reasons — generate
+// when the octave ladders or the core count move, encode when the image size or
+// the PNG settings do — and an "it got slower" report that does not separate the
+// two is not yet a measurement.
+type renderCost struct {
+	tiles       int
+	evaluations int
+	generate    time.Duration
+	encode      time.Duration
+}
+
+// logCost prints one render's cost line to the console.
+func logCost(what string, c renderCost) {
+	perSecond := 0.0
+	if c.generate > 0 {
+		perSecond = float64(c.tiles) / c.generate.Seconds()
+	}
+	log.Printf("%s (%d tiles, %d evaluations, %d ms generate, %d ms encode, %.0f tiles/s)",
+		what, c.tiles, c.evaluations,
+		c.generate.Milliseconds(), c.encode.Milliseconds(), perSecond)
+}
+
 // writePNG encodes and writes an image, with a strong entity tag.
 //
 // The tag stops being a pure function of the URL, which is the departure, but
@@ -151,7 +178,11 @@ func (s *server) withRender(fn func() (*image.RGBA, error)) (*image.RGBA, error)
 // with it, so a browser holding an old image asks again. Eight bytes rather than
 // the four a page prints, because a tuning session walks through hundreds of
 // configurations under otherwise identical URLs.
-func (s *server) writePNG(w http.ResponseWriter, r *http.Request, img *image.RGBA, cfg wgva.Config) {
+//
+// The cost line is logged here rather than in the handler because the encode is
+// here, and a render cost that left the encode out would be the half of the
+// figure that does not move when the generator does.
+func (s *server) writePNG(w http.ResponseWriter, r *http.Request, img *image.RGBA, cfg wgva.Config, cost renderCost) {
 	d, err := config.Of(cfg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -163,11 +194,14 @@ func (s *server) writePNG(w http.ResponseWriter, r *http.Request, img *image.RGB
 		return
 	}
 
+	start := time.Now()
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	cost.encode = time.Since(start)
+	logCost(r.URL.Path, cost)
 
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("ETag", etag)

@@ -240,9 +240,9 @@ type Tile struct {
 // Tile returns everything the generator says about one coordinate.
 //
 // It costs seven elevation evaluations: its own, and the six neighbors that
-// relief and the water's edge are read from. That is the whole reason a render
-// budget is counted in evaluations rather than in tiles, and it is why Sample
-// does not carry one. See DESIGN.md 4.3 and 29.
+// relief and the water's edge are read from. That is the whole reason a render's
+// cost is counted in evaluations rather than in tiles, and it is why Sample does
+// not carry one. See DESIGN.md 4.3 and 29.
 //
 // **Nothing here calls Tile, and nothing here calls Relief.** Both would
 // recurse until the stack was gone — relief reads six neighbors and each

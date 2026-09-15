@@ -33,9 +33,13 @@
 </form>
 
 <h2>cost</h2>
-<p class="doc">{{.Evaluations}} generator evaluations, against a budget of {{.Budget}}
-({{percent .Evaluations .Budget}}%). The budget is counted in evaluations rather than tiles,
-because a tile count cannot tell a cheap window from one seven times longer.</p>
+<p class="doc">{{.Tiles}} tiles, {{.Evaluations}} generator evaluations for this image{{if .ReadoutCost}},
+and {{.ReadoutCost}} more for the readout below it{{end}}.
+Counted in evaluations rather than tiles, because a tile count cannot tell a cheap window from one
+seven times longer: <code>relief</code> and <code>terrain</code> read the six neighbouring elevations
+and cost seven apiece, and every other layer costs one.</p>
+<p class="doc">Nothing here is a limit. What each render actually took — tiles, generate and encode
+milliseconds, tiles per second — is logged to the console as it is served.</p>
 
 <h2>what was evaluated</h2>
 <pre>{{.FieldTree}}</pre>

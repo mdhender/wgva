@@ -51,12 +51,7 @@ func main() {
 		host = flag.String("host", "127.0.0.1", "address to bind (the default is loopback, and should stay that way)")
 		port = flag.Int("port", 8180, "port to bind")
 		seed = flag.String("seed", "0x0123456789abcdef", "world seed, in decimal or with an 0x prefix")
-		// The budget is counted in generator evaluations rather than tiles,
-		// because a tile count cannot tell a cheap window from one seven times
-		// longer. Raising it is a thing this tool is for: measuring how long a
-		// large window takes is part of tuning.
-		budget = flag.Int("budget", 4_000_000, "evaluations one window may cost")
-		file   = flag.String("config", "", "configuration file to start from (defaults to this binary's defaults)")
+		file = flag.String("config", "", "configuration file to start from (defaults to this binary's defaults)")
 	)
 	flag.Parse()
 
@@ -64,10 +59,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("--seed: %v", err)
 	}
-	if *budget < 1 {
-		log.Fatalf("--budget: %d is not a number of evaluations", *budget)
-	}
-
 	cfg := wgva.DefaultConfig()
 	if *file != "" {
 		data, err := os.ReadFile(*file)
@@ -79,7 +70,7 @@ func main() {
 		}
 	}
 
-	srv := newServer(defaultSeed, cfg, *budget)
+	srv := newServer(defaultSeed, cfg)
 
 	addr := net.JoinHostPort(*host, fmt.Sprint(*port))
 	listener, err := net.Listen("tcp", addr)
@@ -94,8 +85,11 @@ func main() {
 	log.Printf("the terrain tuning tool, on a developer's machine and nowhere else")
 	log.Printf("build %s, algorithm version %d, world radius %d", wgva.Version(), wgva.AlgorithmVersion, wgva.WorldRadius)
 	log.Printf("configuration %s (%s)", d.Short(), configurationLabel(cfg))
-	log.Printf("seed %s, budget %d evaluations, %d concurrent renders",
-		view.FormatSeed(defaultSeed), *budget, runtime.GOMAXPROCS(0))
+	// No window is refused for being expensive. What every render costs is
+	// logged as it is served, which is what an administrator iterating on a
+	// configuration actually needs — see DESIGN.md 31.1.
+	log.Printf("seed %s, %d concurrent renders, every render's cost logged below",
+		view.FormatSeed(defaultSeed), runtime.GOMAXPROCS(0))
 	log.Printf("http://%s/", listener.Addr())
 
 	server := &http.Server{

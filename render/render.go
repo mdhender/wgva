@@ -55,10 +55,6 @@ var (
 	// ErrStride is returned for a sampling stride outside its bounds, or for a
 	// stride above one in a hex render, where the hexes would no longer tile.
 	ErrStride = errors.New("sampling stride out of range")
-
-	// ErrBudget is returned for a window that costs more generator evaluations
-	// than the caller allowed.
-	ErrBudget = errors.New("window exceeds the evaluation budget")
 )
 
 // RenderError names what was out of range and wraps the reason.
@@ -80,10 +76,18 @@ func (e *RenderError) Error() string {
 // Unwrap returns the sentinel reason.
 func (e *RenderError) Unwrap() error { return e.Err }
 
-// The bounds every window is checked against. They are generous: the real bound
-// on a window is the evaluation budget, which is what a caller actually cares
-// about and what a 400 names. These exist so that an absurd request is refused
-// before anything is allocated.
+// The bounds every window is checked against. They are generous, and they are
+// the only bound: a window is refused for being unrepresentable, never for being
+// expensive.
+//
+// There was once an evaluation budget here that refused a window costing more
+// than a caller allowed. It is gone. It came from the Rust implementation's
+// performance requirements, and it was exactly backwards for the tool it
+// governed — the terrain tuning tool exists to be pointed at expensive windows,
+// and a person tuning terrain who asks for the whole world at the terrain layer
+// is using the tool correctly. What a front end owes them is the cost, not a
+// refusal: [Viewport.Evaluations] is the number and DESIGN.md 31.1 is the line
+// it goes in. See DESIGN.md appendix D.18.
 const (
 	MaxCols    = 8191
 	MaxRows    = 8191
@@ -190,23 +194,23 @@ func (v Viewport) CoordAt(col, row int) wgva.Coord {
 
 // Evaluations is what one window of one layer costs, in generator evaluations.
 //
-// This is the unit a budget is counted in rather than tiles, because a tile
-// count cannot tell a cheap window from one seven times longer. See
-// DESIGN.md 29.1.
+// It is counted in evaluations rather than tiles because a tile count cannot
+// tell a cheap window from one seven times longer: relief and terrain read the
+// six neighboring elevations and cost seven apiece, and every other layer costs
+// one.
+//
+// Nothing refuses a window for this number. It is reported — on the page beside
+// the picture and in the cost line of DESIGN.md 31.1 — because an administrator
+// who waits eleven seconds for a render wants to know what she asked for, and
+// because "it got slower" is not a measurement until the window it was measured
+// over is known. See DESIGN.md 29.1.
 func (v Viewport) Evaluations(l Layer) int {
 	return v.Cols * v.Rows * l.Cost
 }
 
-// CheckBudget reports whether the window is affordable, as an errors.Is-able
-// refusal naming the number. A caller turns it into a 400; measuring how long a
-// large window takes is a thing the tuning tool is for, so the budget is the
-// caller's to raise.
-func (v Viewport) CheckBudget(l Layer, budget int) error {
-	if n := v.Evaluations(l); n > budget {
-		return &RenderError{What: "evaluations", Value: n, Lo: 0, Hi: budget, Err: ErrBudget}
-	}
-	return nil
-}
+// Tiles is how many cells the window samples. It is the other half of a cost
+// line: the evaluations say what the work was and this says what it was work on.
+func (v Viewport) Tiles() int { return v.Cols * v.Rows }
 
 // sampleCells fills one value per cell, in a fixed cell order.
 //

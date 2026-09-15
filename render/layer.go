@@ -74,10 +74,11 @@ type Layer struct {
 
 	// Cost is how many generator evaluations one tile of this layer takes.
 	//
-	// It is the unit the tuning tool's budget is counted in, and it has to be,
-	// because a tile count cannot tell a cheap window from one seven times
-	// longer: relief, climate, and terrain read the six neighboring elevations
-	// and cost seven apiece, and every other layer costs one. See DESIGN.md 29.
+	// It is the unit a window's cost is counted in, and it has to be, because a
+	// tile count cannot tell a cheap window from one seven times longer:
+	// relief and terrain read the six neighboring elevations and cost seven
+	// apiece, and every other layer costs one. Nothing refuses a window for
+	// being expensive; the number is reported. See DESIGN.md 29 and 31.1.
 	Cost int
 
 	key    Key
@@ -209,9 +210,9 @@ func buildLayers() []Layer {
 			Name: "relief",
 			Doc:  "local steepness: the mean elevation difference to the six neighbors",
 			// Seven evaluations a tile, because it reads the six neighboring
-			// elevation scalars as well as its own. This is the whole reason
-			// the tuning tool's budget is counted in evaluations rather than in
-			// tiles. DESIGN.md 18 and 29.
+			// elevation scalars as well as its own. This is the whole reason a
+			// window's cost is counted in evaluations rather than in tiles.
+			// DESIGN.md 18 and 29.
 			Cost: 7,
 			key: Key{
 				Kind: KeyRamp, Ramp: UnitRamp,

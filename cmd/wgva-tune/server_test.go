@@ -21,10 +21,7 @@ const testSeed = wgva.Seed(0x0123456789abcdef)
 
 func newTestServer(t *testing.T) (*server, *httptest.Server) {
 	t.Helper()
-	// A budget small enough that the largest window the grammar allows —
-	// 1001 x 1001, which is 1,002,001 evaluations — is over it, so the refusal
-	// can be tested without drawing a picture the size of a small country.
-	s := newServer(testSeed, wgva.DefaultConfig(), 500_000)
+	s := newServer(testSeed, wgva.DefaultConfig())
 	ts := httptest.NewServer(s.routes())
 	t.Cleanup(ts.Close)
 	return s, ts
@@ -204,7 +201,6 @@ func TestRefusalsAre400(t *testing.T) {
 		"a coordinate that is not a number": seedPath() + "/map.png?q=origin",
 		"a layer that does not exist":       seedPath() + "/map.png?layer=rivers",
 		"a seed that is not a number":       "/seed/not-a-seed",
-		"a window over budget":              seedPath() + "/grid.png?cols=1001&rows=1001&scale=1",
 	}
 	for name, path := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -219,12 +215,45 @@ func TestRefusalsAre400(t *testing.T) {
 	}
 }
 
-// TestBudgetNamesTheNumber asserts a refusal a person can act on.
-func TestBudgetNamesTheNumber(t *testing.T) {
+// TestExpensiveWindowsAreDrawnNotRefused is the rule stated where somebody
+// would look for the old refusal. The terrain tuning tool exists to be pointed
+// at expensive windows; refusing one is refusing the tool's purpose.
+func TestExpensiveWindowsAreDrawnNotRefused(t *testing.T) {
 	_, ts := newTestServer(t)
-	_, body := get(t, ts, seedPath()+"/grid.png?cols=1001&rows=1001&scale=1")
-	if !strings.Contains(body, "1002001") {
-		t.Errorf("the refusal does not name the number of evaluations: %q", firstLine(body))
+
+	// The largest window the grammar allows, at the most expensive layer, drawn
+	// at a stride so the test is not seven million tiles long.
+	path := seedPath() + "/grid.png?cols=1001&rows=751&scale=1&stride=256&layer=terrain"
+	resp, body := get(t, ts, path)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s returned %d: %s", path, resp.StatusCode, firstLine(body))
+	}
+	if got := resp.Header.Get("Content-Type"); got != "image/png" {
+		t.Fatalf("content type is %q, want image/png", got)
+	}
+}
+
+// TestPagesPrintWhatAWindowCosts is what stands where the budget did: the number
+// is reported rather than enforced.
+func TestPagesPrintWhatAWindowCosts(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	// 21 x 15 at the terrain layer is 315 tiles and 2205 evaluations.
+	_, body := get(t, ts, seedPath()+"?cols=21&rows=15&layer=terrain")
+	for _, want := range []string{"315 tiles", "2205 generator evaluations"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the map tab does not print %q", want)
+		}
+	}
+	if strings.Contains(body, "budget") {
+		t.Error("the map tab still mentions a budget")
+	}
+
+	// The same window on a one-evaluation layer costs a seventh of it, which is
+	// the whole reason the unit is evaluations and not tiles.
+	_, elevation := get(t, ts, seedPath()+"?cols=21&rows=15&layer=elevation")
+	if !strings.Contains(elevation, "315 generator evaluations") {
+		t.Error("the map tab does not price a one-evaluation layer at one a tile")
 	}
 }
 
@@ -469,20 +498,16 @@ func TestMapTabCountsTheWindow(t *testing.T) {
 	}
 }
 
-// TestMapPageIsBudgeted states that the page is budgeted and not only the
-// image. A readout costs a whole tile per cell whatever layer is on screen, so
-// a page that counted an unbounded window would be the one endpoint here that a
-// careless window size could stall.
-func TestMapPageIsBudgeted(t *testing.T) {
+// TestMapPageDrawsALargeWindow covers the page that pays for the window twice —
+// once for the image and once for the readout beside it — and is not refused for
+// it either.
+func TestMapPageDrawsALargeWindow(t *testing.T) {
 	_, ts := newTestServer(t)
-	resp, body := get(t, ts, seedPath()+"?cols=1001&rows=1001")
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("GET an oversized map page returned %d, want 400", resp.StatusCode)
+	resp, body := get(t, ts, seedPath()+"?cols=201&rows=151&layer=terrain")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET a large map page returned %d: %s", resp.StatusCode, firstLine(body))
 	}
-	if !strings.Contains(body, "7014007") {
-		t.Errorf("the refusal does not name the number of evaluations: %q", firstLine(body))
-	}
-	if !strings.Contains(body, "--budget") {
-		t.Errorf("the refusal does not say how the budget moves: %q", firstLine(body))
+	if !strings.Contains(body, "what is in this window") {
+		t.Error("the page carries no readout")
 	}
 }

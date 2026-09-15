@@ -213,27 +213,55 @@ func TestNewViewportRefusals(t *testing.T) {
 	}
 }
 
-// TestBudgetCountsEvaluations pins the unit. A tile count cannot tell a cheap
-// window from one seven times longer, which is why the budget is not one.
-func TestBudgetCountsEvaluations(t *testing.T) {
+// TestEvaluationsCountTheWindow pins the unit a window's cost is reported in. A
+// tile count cannot tell a cheap window from one seven times longer, which is
+// why the figure a front end prints is not one.
+//
+// There was once a CheckBudget beside this that refused a window costing more
+// than a caller allowed. It is gone: the terrain tuning tool exists to be
+// pointed at expensive windows, and a person who asks for the whole world at the
+// terrain layer is using it correctly. What is owed is the number, not a
+// refusal. See DESIGN.md appendix D.18.
+func TestEvaluationsCountTheWindow(t *testing.T) {
 	v := mustViewport(t, wgva.Origin, 101, 51, 0, 1)
-	l, err := render.LayerNamed(render.DefaultLayer)
+
+	if got, want := v.Tiles(), 101*51; got != want {
+		t.Fatalf("Tiles = %d, want %d", got, want)
+	}
+	for _, name := range []string{render.DefaultLayer, "terrain", "relief", "climate"} {
+		l, err := render.LayerNamed(name)
+		if err != nil {
+			t.Fatalf("LayerNamed(%q): %v", name, err)
+		}
+		if got, want := v.Evaluations(l), 101*51*l.Cost; got != want {
+			t.Errorf("the %s layer over this window is %d evaluations, want %d", name, got, want)
+		}
+	}
+}
+
+// TestNothingRefusesAnExpensiveWindow states the rule directly: the only bounds
+// on a window are the ones that make it unrepresentable.
+func TestNothingRefusesAnExpensiveWindow(t *testing.T) {
+	g := wgva.NewDefault(1)
+
+	// The largest window the grammar allows, at the most expensive layer. It is
+	// drawn at a stride so the test does not generate seven million tiles to
+	// prove the point; what is under test is that nothing refuses it.
+	v := mustViewport(t, wgva.Origin, 1001, 751, 0, 256)
+	l, err := render.LayerNamed("terrain")
 	if err != nil {
 		t.Fatalf("LayerNamed: %v", err)
 	}
-	want := 101 * 51 * l.Cost
-	if got := v.Evaluations(l); got != want {
-		t.Fatalf("Evaluations = %d, want %d", got, want)
+	if v.Evaluations(l) < 5_000_000 {
+		t.Fatalf("this window costs %d evaluations; the test wants an expensive one", v.Evaluations(l))
 	}
-	if err := v.CheckBudget(l, want); err != nil {
-		t.Errorf("a window exactly at the budget was refused: %v", err)
+
+	img, err := render.RenderGrid(g, v, l, 1)
+	if err != nil {
+		t.Fatalf("RenderGrid refused an expensive window: %v", err)
 	}
-	err = v.CheckBudget(l, want-1)
-	if !errors.Is(err, render.ErrBudget) {
-		t.Fatalf("CheckBudget returned %v, want an error wrapping ErrBudget", err)
-	}
-	if re, ok := errors.AsType[*render.RenderError](err); !ok || re.Value != want {
-		t.Errorf("the refusal does not name the number of evaluations: %v", err)
+	if b := img.Bounds(); b.Dx() != 1001 || b.Dy() != 751 {
+		t.Fatalf("the image is %dx%d, want 1001x751", b.Dx(), b.Dy())
 	}
 }
 
@@ -598,9 +626,9 @@ func TestClimateLayerIsTheTwoAxesAndNotACombinedValue(t *testing.T) {
 //
 // Terrain and relief read the six neighboring elevation scalars and cost seven
 // evaluations apiece; everything else costs one, including climate, which reads
-// the elevation at its own tile and nothing around it. A budget counted in
-// tiles could not tell a cheap window from one seven times longer, which is the
-// whole reason Layer.Cost exists.
+// the elevation at its own tile and nothing around it. A cost counted in tiles
+// could not tell a cheap window from one seven times longer, which is the whole
+// reason Layer.Cost exists.
 func TestTerrainLayerCostsSeven(t *testing.T) {
 	for name, want := range map[string]int{
 		"terrain": 7, "relief": 7,

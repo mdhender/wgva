@@ -2301,7 +2301,7 @@ terrain
 
 Fifteen of those are scalar ramps, `climate` is the two-axis band table, and `terrain` is a vocabulary of swatches — which is why `Layer.Key` returns one of three shapes rather than a ramp with two labels. Four of the ramps are the raw noise scales of section 10 and exist to separate "the noise is wrong" from "the composition is wrong" when a window looks off; nothing in the generator reads them. The `rim` layer draws `RimDistance` and the falloff profile, so the band can be tuned without hunting for the world's edge in the terrain layer.
 
-`Layer.Cost` is the other thing a front end needs from this list: `relief` and `terrain` cost seven generator evaluations a tile because they read the six neighboring elevations, and every other layer costs one. `climate` is not one of the seven, which is worth saying because it classifies and so looks as though it should be: section 16 gives neither axis a term that reads a neighbor, so the composite reads the elevation scalar at its own tile and nothing around it. The tuning tool's budget is counted in these, not in tiles.
+`Layer.Cost` is the other thing a front end needs from this list: `relief` and `terrain` cost seven generator evaluations a tile because they read the six neighboring elevations, and every other layer costs one. `climate` is not one of the seven, which is worth saying because it classifies and so looks as though it should be: section 16 gives neither axis a term that reads a neighbor, so the composite reads the elevation scalar at its own tile and nothing around it. A window's cost is counted in these, not in tiles.
 
 Rendering notes that apply to every front end:
 
@@ -2384,7 +2384,9 @@ What it distorts: a hex row's centers are `sqrt(3) r` apart and a column's are `
 
 Rendering is parallel — goroutines across columns — which is exactly the permission section 20 grants: every cell is a pure function of its own coordinate written to its own slot, so the scheduling split cannot reach the result, and nothing here accumulates across tiles.
 
-**The bound is a budget counted in generator evaluations, not in tiles.** `relief` and `terrain` cost seven evaluations apiece and every other layer costs one, so a tile count could not tell a cheap window from one seven times longer. Over budget is a 400 naming the number, and `--budget` raises it, because measuring how long a large window takes is a thing this tool is for.
+**A window's cost is counted in generator evaluations, not in tiles, and it is reported rather than enforced.** `relief` and `terrain` cost seven evaluations apiece and every other layer costs one, so a tile count could not tell a cheap window from one seven times longer. Every tab prints what the window on it costs, and every render logs what it actually took (section 31.1).
+
+**Nothing refuses a window for being expensive.** An earlier revision of this section carried an evaluation budget and a `--budget` flag that raised it, inherited from the Rust implementation's performance requirements. It was removed, because it was backwards for the tool it governed: this is the tool that exists to be pointed at expensive windows, and an administrator who asks for the whole world at the `terrain` layer is using it correctly. The bounds that remain are the window grammar's clamps in section 29.3, which refuse a window for being unrepresentable and never for being slow. Appendix D.18 records it.
 
 #### The turn
 
@@ -2400,7 +2402,7 @@ The map tab counts what is in the window it is drawing: the terrain mix, the ele
 
 Every terrain is listed, including the ones with no tiles, because a row reading zero is usually the row somebody is trying to move off zero.
 
-`Distribution` lives in `render` — it is a measurement over a window, and a window is that package's — so a front end and the CLI cannot disagree about what a window contains. It costs a whole `Tile` per cell, which is seven evaluations whatever layer is on screen, so the map *page* goes through the same evaluation budget the images do, and the grid tab does not show one: a million tiles of readout is seven million evaluations for a second copy of work the image already did.
+`Distribution` lives in `render` — it is a measurement over a window, and a window is that package's — so a front end and the CLI cannot disagree about what a window contains. It costs a whole `Tile` per cell, which is seven evaluations whatever layer is on screen, so the map *page* pays for its window twice — once for the image and once for the readout — and the grid tab does not show one: a million tiles of readout is seven million evaluations for a second copy of work the image already did. The page prints both figures, and pays them.
 
 These are integer counts accumulated in one goroutine. That is not the accumulation section 20 forbids in a batch fill — that rule is about a scheduling split deciding a floating-point sum — and a test asserts the count does not depend on the order the coordinates arrive in.
 
@@ -2893,8 +2895,11 @@ A radial walk to the rim is a few thousand steps at the shipped radius, which is
 not be one.** A threshold written into a design becomes a thing to argue with
 rather than a thing to learn from, and the questions this document actually
 defers to a measurement — the tile cache in section 27.6, the region cache in
-section 26, the render budget in section 29.1 — each need a number rather than a
-verdict against a number.
+section 26 — each need a number rather than a verdict against a number.
+
+Section 29.1 once carried a render budget, and it is the cautionary case for this
+whole section: a threshold written into a design became a thing that refused the
+work the tool existed to do. What replaced it is the cost line below.
 
 **Only the administrator is hyper-focused on performance, and only in two
 situations:** viewing a large map, and iterating on a configuration. Both are
@@ -2913,7 +2918,7 @@ Every front end and `wgva-map --grid` logs what each render actually cost — ti
 (1002001 tiles, 405 ms generate, 190 ms encode, 2471232 tiles/s)
 ```
 
-That line is also why the budget in section 29.1 is counted in generator evaluations rather than tiles: `relief` and `terrain` cost seven apiece and every other layer costs one, so a tile count cannot tell a cheap window from one seven times longer. `--budget` raises the bound precisely so that measuring a large window is something these tools can be asked to do.
+That line is also why a window's cost is counted in generator evaluations rather than tiles: `relief` and `terrain` cost seven apiece and every other layer costs one, so a tile count cannot tell a cheap window from one seven times longer. **The line is the whole mechanism.** Nothing refuses a large window — measuring how long one takes is precisely what these tools are asked to do — so what a front end owes an administrator is the measurement, logged where the window was served.
 
 Two figures worth watching separately, because they respond to different changes:
 
@@ -4185,8 +4190,8 @@ are both local, and the rain shadow D.13 mentions is a statement about the
 moisture field's wavelength rather than about sampling upwind. So the *reason*
 the three sentences gave was false and not merely their number, and they now say
 `relief` and `terrain`. Costing climate at seven would have over-charged every
-budget by a factor of seven for work nobody does, and a budget that refuses
-affordable windows is a budget people raise until it stops meaning anything.
+window by a factor of seven for work nobody does — and the budget that charge was
+against has since been removed for a related reason, recorded in D.18.
 
 **A later version that does give climate a term reading its neighbors makes the
 seven right again**, and it would have to move the three sentences back and
@@ -4400,3 +4405,62 @@ tests, not by looking at the world. What the whole-world image answers is whethe
 the continents cover the world plausibly.
 
 *Phase 7.*
+
+### D.18 Two names and one bound the front ends settled
+
+Three small departures from the body, none of which changes a generated value.
+They are together because they were all found the same way — by writing the
+thing the body describes and discovering the body had named it under different
+circumstances.
+
+**`Region` was taken, so the batch form is `TilesWithin`.** Section 20 calls the
+hex-region batch `Generator.Region(center, radius)`. Phase 3 had already given
+that name to the region *addressing* method — `Region(c)` returns the region cell
+a coordinate falls in — and two methods on one type cannot share it. The batch
+form is `TilesWithin`, with `CoordsWithin` as the walk behind it, and the
+addressing method keeps the name it has had since regions existed. Nothing about
+the semantics of section 20 changes.
+
+**A player marker is a shape, not a name.** Section 29.4 describes `Overlays` as
+sorted slices of coordinates and of coordinate/name pairs, which it is, but says
+nothing about how a name reaches the picture. It does not: drawing text needs a
+font, and appendix B's dependency map has none and should not gain one for this.
+`RenderPlayer` draws a filled square for a settlement and a filled diamond for a
+label, both outside every terrain and ramp color, and the name is carried for the
+page beside the image to print. A later revision that genuinely needs glyphs in
+the image is a dependency decision, not a rendering detail.
+
+**The evaluation budget is gone.** This is the one worth reading twice, because
+it was not a naming slip.
+
+Sections 29.1 and 31.1 carried a bound on how many generator evaluations one
+window could cost, a 400 that named the number when a window exceeded it, and a
+`--budget` flag that raised it. It came across from the Rust implementation,
+where it belonged to that project's performance requirements, and it was never
+asked for here.
+
+It was removed because it was backwards for the tool it governed. `cmd/wgva-tune`
+exists to decide what worlds look like, and the windows that answer that question
+are the expensive ones: the whole world at the `terrain` layer is seven
+evaluations a tile over a million tiles, and asking for it is using the tool
+correctly rather than abusing it. Under the budget, the single most useful view
+in the tool was the one view it refused, and the remedy — raise a flag and
+restart the process — interrupted exactly the iteration the tool exists to make
+fast. D.14 had already noticed the shape of this from the other end: *a budget
+that refuses affordable windows is a budget people raise until it stops meaning
+anything.* The same sentence with the word "affordable" removed is this entry.
+
+What stands in its place is the cost line of 31.1, which was specified in the
+same revision and is strictly more useful: every tab prints what its window costs
+in tiles and evaluations before drawing it, and every render logs tiles,
+evaluations, generate milliseconds, encode milliseconds, and tiles per second as
+it is served. An administrator who waits eleven seconds now learns what she asked
+for and what it cost, which is the thing she was going to want anyway; the budget
+could only ever tell her she could not have it.
+
+The window grammar's clamps stay. They are a different kind of bound — `cols` and
+`rows` are clamped to odd counts inside section 29.3's limits so that a window
+has a centre cell and an absurd request is refused before anything is allocated —
+and they refuse a window for being unrepresentable, never for being slow.
+
+*Phase 8.*

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/mdhender/wgva"
 	"github.com/mdhender/wgva/config"
@@ -115,7 +116,7 @@ type page struct {
 	Tabs        []link
 	LayerDoc    string
 	Evaluations int
-	Budget      int
+	Tiles       int
 	ImageURL    string
 	FieldTree   string
 	Warning     string
@@ -159,7 +160,6 @@ func (s *server) newPage(tab string, req request) page {
 		FingerprintShort: d.Short(),
 		Label:            configurationLabel(req.cfg),
 		IsDefault:        config.IsDefault(req.cfg),
-		Budget:           s.budget,
 	}
 
 	// The identity pair wgva-world create takes. Nobody types it; the tool emits
@@ -227,11 +227,20 @@ func (s *server) newPage(tab string, req request) page {
 		})
 	}
 
+	// What this window costs, on the tab that is about to draw it. It is
+	// reported and never enforced: a person tuning terrain who asks for the
+	// whole world at the terrain layer is using the tool correctly, and what the
+	// tool owes them is the number rather than a refusal.
 	layer, err := req.view.RenderLayer()
 	if err == nil {
 		p.LayerDoc = layer.Doc
-		if vp, err := req.view.Viewport(); err == nil {
+		viewport := req.view.Viewport
+		if tab == "grid" {
+			viewport = req.view.GridViewport
+		}
+		if vp, err := viewport(); err == nil {
 			p.Evaluations = vp.Evaluations(layer)
+			p.Tiles = vp.Tiles()
 		}
 	}
 
@@ -243,7 +252,13 @@ func (s *server) newPage(tab string, req request) page {
 		p.ImageURL = base + "/map.png?" + req.view.Query()
 		if vp, err := req.view.Viewport(); err == nil {
 			p.ReadoutCost = vp.Cost()
+			start := time.Now()
 			p.Distribution = render.Measure(req.gen, vp)
+			logCost("readout "+base, renderCost{
+				tiles:       vp.Tiles(),
+				evaluations: vp.Cost(),
+				generate:    time.Since(start),
+			})
 		}
 	case "grid":
 		p.ImageURL = base + "/grid.png?" + req.view.Query()
@@ -365,25 +380,13 @@ func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
 // handleMap draws the map tab: the picture, the controls, and the readout of
 // what is in the window.
 //
-// The page is budgeted, not only the image. The readout costs a whole Tile per
-// cell — seven evaluations whatever layer is on screen — so a page that counted
-// an unbounded window would be the one endpoint in this tool that a careless
-// window size could stall, while every image beside it was refused politely. The
-// refusal names the number and --budget is how it is raised, which is the same
-// answer an oversized image gets. See DESIGN.md 29.1.
+// Nothing here refuses a window for being expensive. The readout costs a whole
+// Tile per cell — seven evaluations whatever layer is on screen — so a large
+// window on this tab is genuinely slow, and what the page does about that is say
+// what it cost. See DESIGN.md 29.1 and 31.1.
 func (s *server) handleMap(w http.ResponseWriter, r *http.Request) {
 	req, ok := s.parse(w, r)
 	if !ok {
-		return
-	}
-	vp, err := req.view.Viewport()
-	if err != nil {
-		renderRefusal(w, err)
-		return
-	}
-	if n := vp.Cost(); n > s.budget {
-		refuse(w, fmt.Errorf("the readout for this window costs %d evaluations, above the budget of %d: "+
-			"a smaller window, or --budget, is how that moves", n, s.budget))
 		return
 	}
 	s.renderPage(w, mapTemplate, s.newPage("map", req))
@@ -412,10 +415,7 @@ func (s *server) handleMapPNG(w http.ResponseWriter, r *http.Request) {
 		renderRefusal(w, err)
 		return
 	}
-	if err := vp.CheckBudget(layer, s.budget); err != nil {
-		renderRefusal(w, err)
-		return
-	}
+	start := time.Now()
 	img, err := s.withRender(func() (*image.RGBA, error) {
 		return render.Render(req.gen, vp, layer, req.view.HexRadius)
 	})
@@ -423,7 +423,11 @@ func (s *server) handleMapPNG(w http.ResponseWriter, r *http.Request) {
 		renderRefusal(w, err)
 		return
 	}
-	s.writePNG(w, r, img, req.cfg)
+	s.writePNG(w, r, img, req.cfg, renderCost{
+		tiles:       vp.Tiles(),
+		evaluations: vp.Evaluations(layer),
+		generate:    time.Since(start),
+	})
 }
 
 func (s *server) handleGridPNG(w http.ResponseWriter, r *http.Request) {
@@ -441,10 +445,7 @@ func (s *server) handleGridPNG(w http.ResponseWriter, r *http.Request) {
 		renderRefusal(w, err)
 		return
 	}
-	if err := vp.CheckBudget(layer, s.budget); err != nil {
-		renderRefusal(w, err)
-		return
-	}
+	start := time.Now()
 	img, err := s.withRender(func() (*image.RGBA, error) {
 		return render.RenderGrid(req.gen, vp, layer, req.view.Scale)
 	})
@@ -452,7 +453,11 @@ func (s *server) handleGridPNG(w http.ResponseWriter, r *http.Request) {
 		renderRefusal(w, err)
 		return
 	}
-	s.writePNG(w, r, img, req.cfg)
+	s.writePNG(w, r, img, req.cfg, renderCost{
+		tiles:       vp.Tiles(),
+		evaluations: vp.Evaluations(layer),
+		generate:    time.Since(start),
+	})
 }
 
 func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {

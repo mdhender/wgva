@@ -414,9 +414,9 @@ func (g *Generator) neighborhoodAt(c Coord, here float64) neighborhood {
 // change the value it produces — which matters because an orientation is a line
 // and its arrow is whichever one the half-angle recovery happened to pick.
 //
-// This costs three evaluations of the ridge field, which is why the tuning
-// tool's budget is counted in elevation evaluations rather than in noise
-// samples: what a caller can count is tiles.
+// This costs three evaluations of the ridge field, which is why a render's cost
+// is counted in elevation evaluations rather than in noise samples: what a
+// caller can count is tiles.
 func (g *Generator) ridgeStructure(p Vec2, orientation UnitVec2) float64 {
 	dx := mathx.Mul(orientation.X, g.cfg.Elevation.RidgeStrideMiles)
 	dy := mathx.Mul(orientation.Y, g.cfg.Elevation.RidgeStrideMiles)
