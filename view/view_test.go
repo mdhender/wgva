@@ -269,18 +269,81 @@ func TestScrollStepsReturnToWhereTheyStarted(t *testing.T) {
 	}
 }
 
-// TestScrollStepIsHalfTheWindow pins which half. North and south move rows/2 and
-// the four diagonals move cols/2, both integer division of an odd count.
-func TestScrollStepIsHalfTheWindow(t *testing.T) {
+// TestScrollStepIsAThirdOfTheWindow pins which third. North and south move a
+// third of the rows and the four diagonals a third of the columns, so a click
+// keeps two thirds of the picture and the feature somebody was following stays
+// on screen.
+func TestScrollStepIsAThirdOfTheWindow(t *testing.T) {
 	v := view.ViewerDefaults(1)
 	for _, point := range []string{"N", "S"} {
-		if got, want := v.ScrollStep(point), v.Rows/2; got != want {
+		if got, want := v.ScrollStep(point), v.Rows/3; got != want {
 			t.Errorf("%s steps %d hexes, want %d", point, got, want)
 		}
 	}
 	for _, point := range []string{"NE", "SE", "SW", "NW"} {
-		if got, want := v.ScrollStep(point), v.Cols/2; got != want {
+		if got, want := v.ScrollStep(point), v.Cols/3; got != want {
 			t.Errorf("%s steps %d hexes, want %d", point, got, want)
+		}
+	}
+}
+
+// TestScrollStepAnswersTheAxisItMovesOn is the half of the step the old front
+// end got wrong: it used one distance for all six points, so a window that was
+// not square scrolled north by a fraction of its width.
+func TestScrollStepAnswersTheAxisItMovesOn(t *testing.T) {
+	v := view.ViewerDefaults(1)
+	v.Cols, v.Rows = 1001, 751
+
+	if north, east := v.ScrollStep("N"), v.ScrollStep("NE"); north == east {
+		t.Fatalf("a %dx%d window steps %d hexes whichever way the click goes", v.Cols, v.Rows, north)
+	}
+	if got, want := v.ScrollStep("N"), 250; got != want {
+		t.Errorf("N steps %d hexes, want %d", got, want)
+	}
+	if got, want := v.ScrollStep("NE"), 333; got != want {
+		t.Errorf("NE steps %d hexes, want %d", got, want)
+	}
+}
+
+// TestGridScrollStepCountsHexesAndNotCells is the other half. A grid cell stands
+// for Stride hexes, so a click that moved Cols/3 *hexes* moved a sixty-fourth of
+// what was on screen at a stride of sixty-four.
+func TestGridScrollStepCountsHexesAndNotCells(t *testing.T) {
+	v := view.ViewerDefaults(1)
+	v.Cols, v.Rows = 1001, 751
+	v.Stride = 64
+
+	if got, want := v.GridScrollStep("NE"), 333*64; got != want {
+		t.Errorf("NE steps %d hexes at a stride of %d, want %d", got, v.Stride, want)
+	}
+	if got, want := v.GridScrollStep("N"), 250*64; got != want {
+		t.Errorf("N steps %d hexes at a stride of %d, want %d", got, v.Stride, want)
+	}
+
+	// The map tab's step is the same window at a stride of one, and must not
+	// pick the grid's stride up out of the URL it shares.
+	if got, want := v.ScrollStep("NE"), 333; got != want {
+		t.Errorf("the map tab steps %d hexes, want %d", got, want)
+	}
+}
+
+// TestGridScrollStepsReturnToWhereTheyStarted is the round trip of DESIGN.md
+// 29.3 at a stride, which is where a step is largest and the wrap most likely to
+// be reached.
+func TestGridScrollStepsReturnToWhereTheyStarted(t *testing.T) {
+	opposites := map[string]string{"N": "S", "S": "N", "NE": "SW", "SW": "NE", "SE": "NW", "NW": "SE"}
+
+	for _, stride := range []int{1, 8, 64, 1024} {
+		base := view.ViewerDefaults(1)
+		base.Cols, base.Rows = 1001, 751
+		base.Stride = stride
+		for point, back := range opposites {
+			moved := base.Scrolled(point, base.GridScrollStep(point))
+			home := moved.Scrolled(back, moved.GridScrollStep(back))
+			if home.Q != base.Q || home.R != base.R {
+				t.Errorf("stride %d: %s then %s lands on (%d, %d), want the origin",
+					stride, point, back, home.Q, home.R)
+			}
 		}
 	}
 }

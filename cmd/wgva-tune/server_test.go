@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -598,4 +599,73 @@ func currentOf(t *testing.T, param string) string {
 		t.Fatalf("no current value for %q", param)
 		return ""
 	}
+}
+
+// TestScrollLinksMoveAThirdOfThePicture is the bug the compass had: every point
+// moved the same quarter of the *columns*, so a tall window scrolled north by a
+// fraction of its width, and the grid tab — where a cell stands for Stride
+// hexes — moved a sixty-fourth of what it was showing.
+//
+// The distances are the window grammar's and are pinned in view; what this
+// asserts is that the page asks it, and asks the right one for the tab.
+func TestScrollLinksMoveAThirdOfThePicture(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	// The counts are chosen so that no two of the three candidate answers
+	// coincide: a third of the rows is 200, a third of the columns is 333, and
+	// the quarter of the columns this used to move is 250.
+	const window = "cols=1001&rows=601&scale=2&stride=64&hex-radius=12&q=0&r=0"
+
+	for _, tc := range []struct {
+		tab   string
+		path  string
+		north int64 // rows/3, times the stride the tab samples at
+		east  int64 // cols/3, likewise
+	}{
+		{"map", seedPath(), 200, 333},
+		{"grid", seedPath() + "/grid", 200 * 64, 333 * 64},
+	} {
+		t.Run(tc.tab, func(t *testing.T) {
+			_, body := get(t, ts, tc.path+"?"+window)
+
+			// North is straight up the r axis, and northeast steps one column.
+			// Both are read off the link rather than recomputed, because the
+			// link is the thing that was wrong.
+			if got := scrollTo(t, body, "N"); got.r != -tc.north || got.q != 0 {
+				t.Errorf("N lands on (%d, %d), want (0, %d)", got.q, got.r, -tc.north)
+			}
+			if got := scrollTo(t, body, "NE"); got.q != tc.east {
+				t.Errorf("NE lands on q=%d, want %d", got.q, tc.east)
+			}
+		})
+	}
+}
+
+// scrollTo follows one compass link and returns the window centre it names.
+func scrollTo(t *testing.T, body, point string) struct{ q, r int64 } {
+	t.Helper()
+
+	label := ">" + point + "</a>"
+	i := strings.Index(body, label)
+	if i < 0 {
+		t.Fatalf("no %s scroll link on the page", point)
+	}
+	anchor := strings.LastIndex(body[:i], `href="`)
+	if anchor < 0 {
+		t.Fatalf("no href before the %s link", point)
+	}
+	rest := body[anchor+len(`href="`):]
+	u, err := url.Parse(html.UnescapeString(rest[:strings.Index(rest, `"`)]))
+	if err != nil {
+		t.Fatalf("parsing the %s link: %v", point, err)
+	}
+
+	var out struct{ q, r int64 }
+	if out.q, err = strconv.ParseInt(u.Query().Get("q"), 10, 64); err != nil {
+		t.Fatalf("the %s link has q=%q", point, u.Query().Get("q"))
+	}
+	if out.r, err = strconv.ParseInt(u.Query().Get("r"), 10, 64); err != nil {
+		t.Fatalf("the %s link has r=%q", point, u.Query().Get("r"))
+	}
+	return out
 }

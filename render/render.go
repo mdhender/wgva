@@ -386,7 +386,11 @@ func borderCells(v Viewport) [][2]int {
 //     eighty-three pixels across at a stride of twelve and eleven at a stride of
 //     eighty-eight. Below a few tens of pixels a feature stops being a shape and
 //     becomes a dot, and that is a property of the window rather than a defect
-//     in the render.
+//     in the render. The rim is the instance of this somebody meets first: the
+//     default band is 120 hexes, which is under two cells at a stride of
+//     sixty-four, so the closed hexagon of DESIGN.md 15.1 arrives as a thin dark
+//     line and reads as a drawn border rather than as terrain. A window wide
+//     enough to hold the world shows the whole hexagon and settles it.
 //
 //   - Aliasing is a second and smaller effect. The shortest wavelength a stride
 //     can carry is twice its spacing, 12*stride miles, and an octave below that

@@ -204,10 +204,19 @@ func (s *server) newPage(tab string, req request) page {
 		})
 	}
 
-	// The scroll step is a quarter of the window, so one click moves the view by
-	// a recognizable amount at any size.
-	step := max(req.view.Cols/4, 1)
+	// One click moves a third of what is on screen, and the window grammar is
+	// what decides how far that is. This used to be a quarter of the columns
+	// computed here, which was wrong twice over: it was the same distance
+	// whichever way the click went, so a tall window scrolled north by a
+	// fraction of its width, and it counted cells as hexes, so a grid at a
+	// stride of sixty-four moved a sixty-fourth of the picture it was showing.
+	// Both are the front end having a second opinion about the grammar. See
+	// DESIGN.md 29.3.
 	for _, point := range render.AdminCompass() {
+		step := req.view.ScrollStep(point.Name)
+		if tab == "grid" {
+			step = req.view.GridScrollStep(point.Name)
+		}
 		p.Scroll = append(p.Scroll, link{
 			Label: point.Name,
 			URL:   href(req.view.Scrolled(point.Name, step)),

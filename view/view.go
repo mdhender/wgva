@@ -116,20 +116,42 @@ func ViewerDefaults(seed wgva.Seed) View {
 	return v
 }
 
-// ScrollStep is how far one click of a compass control moves the viewer, in
-// whole hexes.
+// ScrollStep is how far one click of a compass control moves the map tab's
+// window, in whole hexes. GridScrollStep is the same step on the grid tab.
 //
 // **Scroll distances are whole hexes**, counted in tiles and never in pixels, so
 // a step means the same thing at every zoom and a step followed by its opposite
-// returns to exactly the coordinate it started from. North and south move
-// rows/2; the four diagonals move cols/2. Both are integer division of an odd
-// count, and opposite points get the same distance, which is what makes the
-// round trip exact rather than nearly exact. See DESIGN.md 29.3.
-func (v View) ScrollStep(point string) int {
+// returns to exactly the coordinate it started from. North and south move a
+// third of the rows; the four diagonals move a third of the columns. Opposite
+// points get the same distance, which is what makes the round trip exact rather
+// than nearly exact. See DESIGN.md 29.3.
+//
+// A third rather than a half because of what a click is for. Half a window
+// leaves one strip of what was on screen and puts the feature somebody was
+// following at the far edge; a third keeps two thirds of the picture, so the
+// thing being tracked stays visible and the eye can follow it across rather than
+// re-finding it after every click.
+func (v View) ScrollStep(point string) int { return v.scrollStep(point, 1) }
+
+// GridScrollStep is the scroll step on the grid tab, where a cell is not a hex.
+//
+// It is the same third of the same window, converted to hexes: a grid cell
+// stands for Stride hexes, so a third of the columns is Cols/3*Stride hexes and
+// a click moves a third of the picture at every stride. The map tab's step needs
+// no such conversion because a hex render is a stride of one, which is also why
+// this is a second method rather than ScrollStep reading v.Stride — a view
+// carries the grid's stride in its URL whichever tab is drawing it, and a map
+// scrolling by it would leap sixty-four screens on a click meant to move one.
+func (v View) GridScrollStep(point string) int { return v.scrollStep(point, v.Stride) }
+
+// scrollStep is a third of the window along the axis the point moves on, in
+// cells, converted to hexes at the given stride.
+func (v View) scrollStep(point string, stride int) int {
+	cells := v.Cols
 	if strings.EqualFold(point, "N") || strings.EqualFold(point, "S") {
-		return max(v.Rows/2, 1)
+		cells = v.Rows
 	}
-	return max(v.Cols/2, 1)
+	return max(cells/3, 1) * max(stride, 1)
 }
 
 // Parse applies the query parameters that are present to base and returns the
