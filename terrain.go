@@ -228,10 +228,12 @@ type Tile struct {
 	// world, and refusing a move is a game rule; nothing in wgva knows what a
 	// move is.
 	//
-	// The rim profile is phase 7 of DESIGN.md 32, so until it lands this is
-	// false everywhere and the classifier's rim rule is reached by nothing. The
-	// rule is written because the order is what this phase settles, not because
-	// there is something to force yet.
+	// It is a function of the coordinate alone, so a caller that wants only this
+	// can ask Generator.IsRim and pay no field evaluation at all. Inside the
+	// band the terrain and the elevation are forced; the heat and the moisture
+	// are still the generated values, because a forced tile that reported a
+	// fabricated climate would corrupt every distribution measurement that
+	// includes it.
 	Rim bool
 }
 
@@ -259,6 +261,7 @@ func (g *Generator) Tile(c Coord) Tile {
 
 	return Tile{
 		Coord:          c,
+		Rim:            e.rim,
 		ElevationValue: e.elevation,
 		HeatValue:      climate.heat,
 		MoistureValue:  climate.moisture,
@@ -266,6 +269,8 @@ func (g *Generator) Tile(c Coord) Tile {
 		Elevation:      band,
 		Climate:        g.cfg.Climate.classify(climate),
 		Terrain: g.cfg.classifyTerrain(terrainInputs{
+			rim:           e.rim,
+			rimKind:       g.cfg.Rim.Kind,
 			elevation:     e.elevation,
 			band:          band,
 			relief:        n.relief,
@@ -295,7 +300,6 @@ func (g *Generator) TerrainAt(c Coord) Terrain { return g.Tile(c).Terrain }
 // four are in [-1, +1], and the compiler would accept any permutation of them.
 type terrainInputs struct {
 	// rim reports that the tile is inside the closed band of DESIGN.md 15.1.
-	// Phase 7 is what sets it; see Tile.Rim.
 	rim bool
 
 	// rimKind is what the closed band is made of, read only when rim is set.

@@ -125,20 +125,16 @@ var ErrUnknownLayer = errors.New("unknown layer")
 
 // AllLayers returns every layer, in a fixed order.
 //
-// DESIGN.md 29 lists seventeen. Sixteen of them are here, and they are the
-// sixteen that exist: the raw noise scales of DESIGN.md 10, which separate "the
-// noise is wrong" from "the composition is wrong" when a window looks off; the
-// four the elevation composite adds, which separate it further into the four
-// scales alone, the finished scalar, the slope, and the ridge term; the two that
-// draw the blended region influence of DESIGN.md 11.2 — which is what the anchor
-// lattice has to be looked for in, because a lattice nothing draws is a lattice
-// nobody sees until it is under a coastline; the two climate axes, drawn apart
-// because they are apart, and the band table that puts them back together; the
-// two fields terrain reads that nothing else does; and terrain itself.
-//
-// Only `rim` is missing, and it arrives with the phase that computes the rim
-// profile. A layer that named a field nothing generates yet would be a control
-// that draws an error.
+// DESIGN.md 29 lists seventeen and all seventeen are here: the raw noise scales
+// of DESIGN.md 10, which separate "the noise is wrong" from "the composition is
+// wrong" when a window looks off; the four the elevation composite adds, which
+// separate it further into the four scales alone, the finished scalar, the slope,
+// and the ridge term; the two that draw the blended region influence of
+// DESIGN.md 11.2 — which is what the anchor lattice has to be looked for in,
+// because a lattice nothing draws is a lattice nobody sees until it is under a
+// coastline; the two climate axes, drawn apart because they are apart, and the
+// band table that puts them back together; the two fields terrain reads that
+// nothing else does; the rim profile; and terrain itself.
 func AllLayers() []Layer { return slices.Clone(layers) }
 
 // LayerNamed returns the layer with that name.
@@ -322,6 +318,30 @@ func buildLayers() []Layer {
 				Lo: -1, Hi: +1, LoLabel: "quiet", HiLabel: "volcanic",
 			},
 			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.VolcanicAt(c) },
+		},
+		Layer{
+			Name: "rim",
+			Doc:  "the rim profile of DESIGN.md 15.1: 0 across the closed band that is forced terrain, rising across the falloff, and 1 over the whole of the world inside it",
+			// One evaluation of nothing at all. The profile is a function of the
+			// coordinate's distance from the edge of the map and reads no field,
+			// which is the property DESIGN.md 17.1 contrasts inland water
+			// against; the cost is one because the unit is evaluations a tile
+			// and zero would read as a layer that draws nothing.
+			Cost: 1,
+			key: Key{
+				Kind: KeyRamp, Ramp: UnitRamp,
+				Lo: 0, Hi: 1, LoLabel: "forced", HiLabel: "the world",
+			},
+			// What this draws is RimDistance run through the falloff, rather
+			// than the distance itself. The distance is a number up to the world
+			// radius and its picture is a hexagonal gradient over the whole map
+			// that says nothing about the band; the profile is flat everywhere
+			// the rim does not reach, so what a window shows is the band and the
+			// shape of its shelf. That is the question this layer exists to
+			// answer — how wide is the rim and how hard does it arrive — and it
+			// is why the tuning tool can be pointed at a corner of the map
+			// rather than hunting for the edge in the terrain layer.
+			sample: func(g *wgva.Generator, c wgva.Coord) float64 { return g.RimProfileAt(c) },
 		},
 		Layer{
 			Name: "terrain",

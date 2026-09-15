@@ -174,7 +174,16 @@ type elevationParts struct {
 	ridge float64
 
 	// elevation is the scalar: -1 deep ocean, 0 sea level, +1 extreme highland.
+	// It is the value the rim profile leaves, which is the composite untouched
+	// everywhere the rim does not reach.
 	elevation float64
+
+	// rimDistance is hexes from the outer edge of the map, and rim reports that
+	// the tile is inside the closed band. Both are carried out for the reason
+	// the scales are: a Sample reports them beside the elevation, and a tile
+	// reads the flag. DESIGN.md 15.1.
+	rimDistance int64
+	rim         bool
 }
 
 // elevationAt evaluates the composite of DESIGN.md 10 at one coordinate.
@@ -187,9 +196,9 @@ type elevationParts struct {
 //	rough   = 1 + roughnessInfluence * regionRoughness
 //	base    = shaped + rough*fine + upliftWeight*regionElevationBias
 //	mask    = smoothstep(base / ridgeOnset)         zero at and below sea level
-//	elev    = rescale(base + ridgeWeight*rough*ridge*mask)
+//	elev    = rim(rescale(base + ridgeWeight*rough*ridge*mask))
 //
-// Four things about that are deliberate:
+// Five things about that are deliberate:
 //
 //   - The contrast pass is applied to the coarse half only. Its job is to pull
 //     the continental scale away from sea level so a coastline is a line rather
@@ -205,6 +214,13 @@ type elevationParts struct {
 //   - Nothing here is normalized against a window. Every threshold and every
 //     weight is a constant of the world, so no value depends on what has been
 //     looked at. DESIGN.md 14 and 33.5.
+//   - The rim is applied last, to the finished scalar rather than to the
+//     composite, because the forced floor is expressed on the scalar's own
+//     scale: -1 is deep ocean at every SeaLevel, so what the band is made of
+//     does not move when the land fraction is tuned. Everywhere the rim does
+//     not reach it returns the scalar unchanged — not scaled by one, unchanged
+//     — which is what makes a zero rim reproduce the unrimmed world bit for
+//     bit. See RimConfig.apply.
 //
 // Basin influence is deliberately absent: DESIGN.md 17.1 puts it in a product
 // with moisture and keeps it out of elevation entirely.
@@ -241,7 +257,11 @@ func (g *Generator) elevationAt(c Coord) elevationParts {
 	mask := smoothstepUnit(base / ec.RidgeOnset)
 	lift := mathx.Mul(mathx.Mul(ec.RidgeWeight, rough), mathx.Mul(parts.ridge, mask))
 
-	parts.elevation = g.cfg.seaLevelRescale(clampUnitSigned(base + lift))
+	parts.rimDistance = c.RimDistance()
+	parts.elevation, parts.rim = g.cfg.Rim.apply(
+		parts.rimDistance,
+		g.cfg.seaLevelRescale(clampUnitSigned(base+lift)),
+	)
 	return parts
 }
 
@@ -261,6 +281,26 @@ func (g *Generator) elevationScalar(c Coord) float64 { return g.elevationAt(c).e
 // world radius, and the configuration. Nothing about which tiles have been
 // generated, in what order, or on which machine can reach it.
 func (g *Generator) ElevationAt(c Coord) float64 { return g.elevationScalar(c) }
+
+// IsRim reports whether a coordinate is inside the closed band of the world
+// rim: forced terrain, closed to play.
+//
+// It costs three comparisons and evaluates no field at all, because rim
+// membership is a function of the coordinate alone — which is the property
+// DESIGN.md 17.1 contrasts inland water against, and the reason the rim ships.
+//
+// **The generator marks; the game enforces.** This is a statement about the
+// world, and refusing a move is a game rule; nothing in wgva knows what a move
+// is.
+func (g *Generator) IsRim(c Coord) bool { return g.cfg.Rim.closed(c.RimDistance()) }
+
+// RimProfileAt returns what the generated world is worth at a coordinate: 0
+// inside the closed band, rising smoothly across the falloff, and exactly 1
+// everywhere inside both.
+//
+// It is what the rim layer draws, and like IsRim it evaluates no field. A world
+// with no rim configured is 1 everywhere, which is the honest picture of it.
+func (g *Generator) RimProfileAt(c Coord) float64 { return g.cfg.Rim.profile(c.RimDistance()) }
 
 // ElevationBandAt returns the elevation band at a coordinate.
 func (g *Generator) ElevationBandAt(c Coord) Elevation {

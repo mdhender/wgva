@@ -297,13 +297,13 @@ func TestLayersAreNamedAndCosted(t *testing.T) {
 	if !seen[render.DefaultLayer] {
 		t.Errorf("the default layer %q is not in the registry", render.DefaultLayer)
 	}
-	// The rim layer is the one of DESIGN.md 29's seventeen that does not exist
-	// yet; it arrives with the phase that computes the rim profile.
-	if _, err := render.LayerNamed("rim"); !errors.Is(err, render.ErrUnknownLayer) {
-		t.Fatalf("LayerNamed of a layer that does not exist yet returned %v, want ErrUnknownLayer", err)
+	// A name nothing draws is a refusal rather than a blank window. "rivers" is
+	// DESIGN.md 34.1, which is a future extension and not a layer.
+	if _, err := render.LayerNamed("rivers"); !errors.Is(err, render.ErrUnknownLayer) {
+		t.Fatalf("LayerNamed of a layer that does not exist returned %v, want ErrUnknownLayer", err)
 	}
-	if got, want := len(all), 16; got != want {
-		t.Errorf("there are %d layers, want the %d of DESIGN.md 29 that exist", got, want)
+	if got, want := len(all), 17; got != want {
+		t.Errorf("there are %d layers, want the %d of DESIGN.md 29", got, want)
 	}
 }
 
@@ -605,6 +605,11 @@ func TestTerrainLayerCostsSeven(t *testing.T) {
 	for name, want := range map[string]int{
 		"terrain": 7, "relief": 7,
 		"climate": 1, "basin": 1, "volcanic": 1, "temperature": 1, "moisture": 1,
+		// The rim reads no field at all — the profile is a function of the
+		// coordinate's distance from the edge of the map — and still costs one,
+		// because the unit is evaluations a tile and a zero would read as a
+		// layer that draws nothing.
+		"rim": 1,
 	} {
 		l, err := render.LayerNamed(name)
 		if err != nil {
@@ -613,5 +618,80 @@ func TestTerrainLayerCostsSeven(t *testing.T) {
 		if l.Cost != want {
 			t.Errorf("%q costs %d evaluations a tile, want %d", name, l.Cost, want)
 		}
+	}
+}
+
+// TestRimLayerDrawsTheBand is the layer of DESIGN.md 29 that exists so the rim
+// can be tuned without hunting for the world's edge in the terrain layer.
+//
+// A window at a corner of the map has to show all three parts of the profile:
+// the forced band at the bottom of the ramp, the shelf climbing across the
+// falloff, and the world at the top. A layer that drew the distance itself
+// instead would be a gradient over the whole map with the band nowhere in it,
+// and it would pass a test that only asked whether the numbers changed.
+func TestRimLayerDrawsTheBand(t *testing.T) {
+	g := wgva.NewDefault(0x0123456789abcdef)
+	rc := g.Config().Rim
+	l, err := render.LayerNamed("rim")
+	if err != nil {
+		t.Fatalf("LayerNamed: %v", err)
+	}
+
+	closed, inner := int64(rc.ClosedHexes), int64(rc.ClosedHexes)+int64(rc.FalloffHexes)
+	if closed == 0 || inner == closed {
+		t.Fatal("the defaults leave no band to draw")
+	}
+	for _, tc := range []struct {
+		distance int64
+		want     float64
+	}{
+		{0, 0},
+		{closed - 1, 0},
+		{closed, 0},
+		{inner, 1},
+		{inner + 1000, 1},
+		{wgva.WorldRadius, 1},
+	} {
+		c := wgva.NewCoord(wgva.WorldRadius-tc.distance, 0)
+		if got := l.Sample(g, c); got != tc.want {
+			t.Errorf("the rim layer %d hexes from the edge is %v, want %v", tc.distance, got, tc.want)
+		}
+	}
+
+	// And in between it climbs, which is the part a picture shows as a shelf.
+	previous := 0.0
+	rising := 0
+	for d := closed; d <= inner; d++ {
+		got := l.Sample(g, wgva.NewCoord(wgva.WorldRadius-d, 0))
+		if got < previous {
+			t.Fatalf("the rim layer fell from %v to %v, %d hexes from the edge", previous, got, d)
+		}
+		if got > previous {
+			rising++
+		}
+		previous = got
+	}
+	if rising < int(inner-closed)/2 {
+		t.Errorf("the rim layer rose at %d of %d rings of the falloff, which is not a shelf", rising, inner-closed)
+	}
+
+	// The band is drawn, not merely sampled: a grid window on the corner paints
+	// more than one color, and one of them is the bottom of the ramp.
+	v := mustViewport(t, wgva.NewCoord(wgva.WorldRadius-60, 0), 121, 121, 0, 1)
+	img, err := render.RenderGrid(g, v, l, 1)
+	if err != nil {
+		t.Fatalf("RenderGrid: %v", err)
+	}
+	colors := map[[4]byte]int{}
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		colors[[4]byte(img.Pix[i:i+4])]++
+	}
+	if len(colors) < 3 {
+		t.Errorf("a window on the rim painted %d colors, which is not a band and a shelf", len(colors))
+	}
+	bottom := l.Key().Ramp.At(0)
+	forced := [4]byte{bottom.R, bottom.G, bottom.B, bottom.A}
+	if colors[forced] == 0 {
+		t.Error("a window on the rim painted none of the forced band")
 	}
 }

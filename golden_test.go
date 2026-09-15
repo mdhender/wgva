@@ -40,6 +40,39 @@ import (
 // that is exercised by hand a hundred times an afternoon.
 const goldenSeed Seed = 0x5747564100000001
 
+// goldenConfig is the configuration the tables below were recorded under: this
+// binary's defaults with the rim of DESIGN.md 15.1 switched off.
+//
+// **That is what lets the rim coexist with a recorded value, and it costs
+// nothing.** Eight of the coordinates below are the rim's own corners and edges,
+// chosen because the far side of the coordinate domain is where a normalizer or
+// an embedding goes wrong — and under the shipped rim those eight tiles are
+// forced, so every one of their rows would be the floor and would move again
+// the next time somebody widened the band by a hex. Zeroing the rim keeps them
+// as statements about the fields, which is what they were recorded to be.
+//
+// It costs nothing because a zero rim reproduces the unrimmed world *bit for
+// bit* — RimConfig.apply returns the composite unchanged rather than scaled by a
+// weight of one — so every other row here is the number the shipped defaults
+// produce as well. TestRimAtZeroIsTheUnrimmedWorld is that assertion, and
+// TestGoldenRim is where the shipped rim's own arithmetic is recorded.
+func goldenConfig() Config {
+	cfg := DefaultConfig()
+	cfg.Rim.ClosedHexes = 0
+	cfg.Rim.FalloffHexes = 0
+	return cfg
+}
+
+// goldenGenerator is the generator every table below is read through.
+func goldenGenerator(t *testing.T) *Generator {
+	t.Helper()
+	g, err := New(goldenSeed, goldenConfig())
+	if err != nil {
+		t.Fatalf("New with the golden configuration: %v", err)
+	}
+	return g
+}
+
 // goldenCoords are the coordinates the table covers. The selection is
 // deliberate: the origin and its immediate neighborhood, because DESIGN.md 9.4
 // is about exactly that place; negative and mixed-sign components, because Go's
@@ -116,7 +149,7 @@ func TestGolden(t *testing.T) {
 		t.Fatalf("the golden table has %d rows for %d coordinates", len(goldenValues), len(goldenCoords))
 	}
 
-	g := NewDefault(goldenSeed)
+	g := goldenGenerator(t)
 	for i, row := range goldenValues {
 		if [2]int64{row.q, row.r} != goldenCoords[i] {
 			t.Fatalf("row %d is for (%d, %d), want (%d, %d)", i, row.q, row.r, goldenCoords[i][0], goldenCoords[i][1])
@@ -212,7 +245,7 @@ func TestGoldenRegion(t *testing.T) {
 		t.Fatalf("the region table has %d rows for %d coordinates", len(goldenRegionValues), len(goldenCoords))
 	}
 
-	g := NewDefault(goldenSeed)
+	g := goldenGenerator(t)
 	for i, row := range goldenRegionValues {
 		if [2]int64{row.q, row.r} != goldenCoords[i] {
 			t.Fatalf("row %d is for (%d, %d), want (%d, %d)", i, row.q, row.r, goldenCoords[i][0], goldenCoords[i][1])
@@ -306,7 +339,7 @@ func TestGoldenElevation(t *testing.T) {
 		t.Fatalf("the elevation golden table has %d rows for %d coordinates", len(goldenElevationValues), len(goldenCoords))
 	}
 
-	g := NewDefault(goldenSeed)
+	g := goldenGenerator(t)
 	for i, row := range goldenElevationValues {
 		if [2]int64{row.q, row.r} != goldenCoords[i] {
 			t.Fatalf("row %d is for (%d, %d), want (%d, %d)", i, row.q, row.r, goldenCoords[i][0], goldenCoords[i][1])
@@ -406,7 +439,7 @@ func TestGoldenClimate(t *testing.T) {
 		t.Fatalf("the climate golden table has %d rows for %d coordinates", len(goldenClimateValues), len(goldenCoords))
 	}
 
-	g := NewDefault(goldenSeed)
+	g := goldenGenerator(t)
 	for i, row := range goldenClimateValues {
 		if [2]int64{row.q, row.r} != goldenCoords[i] {
 			t.Fatalf("row %d is for (%d, %d), want (%d, %d)", i, row.q, row.r, goldenCoords[i][0], goldenCoords[i][1])
@@ -527,7 +560,7 @@ func TestGoldenTerrain(t *testing.T) {
 		t.Fatalf("the terrain golden table has %d rows for %d coordinates", len(goldenTerrainValues), len(goldenCoords))
 	}
 
-	g := NewDefault(goldenSeed)
+	g := goldenGenerator(t)
 	cfg := g.Config()
 	for i, row := range goldenTerrainValues {
 		if [2]int64{row.q, row.r} != goldenCoords[i] {
@@ -553,6 +586,115 @@ func TestGoldenTerrain(t *testing.T) {
 
 		if got := g.TerrainAt(c); got != row.terrain {
 			t.Errorf("terrain at (%d, %d) = %v, want %v", row.q, row.r, got, row.terrain)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The rim profile
+// ---------------------------------------------------------------------------
+
+// The sixth golden table: the rim of DESIGN.md 15.1 under the *shipped* rim
+// rather than under goldenConfig's zeroed one, at coordinates chosen for their
+// distance from the edge of the map.
+//
+// It is the one table here that is read through NewDefault, and that is the
+// division of labor the two configurations buy. The five tables above pin the
+// fields, at coordinates that include the rim's corners, with nothing forced;
+// this one pins what the shipped band does to them. A rim default that moves
+// moves these rows and none of those, which is exactly what somebody widening
+// the closed band by a hex should see in a diff.
+//
+// The three rows at distance 67 are on three different sides of the hexagon, and
+// their profile weights are recorded as identical bit patterns. That is "the rim
+// is uniform all the way round" as an assertion rather than as a look at a
+// picture: the weight is a function of the distance and of nothing else, while
+// the elevations underneath it are three different numbers.
+//
+// Recorded under AlgorithmVersion 6 at world radius 32767, with
+// ClosedHexes = 24, FalloffHexes = 96, and FloorElevation = -1.
+
+// goldenRimRow is one coordinate, its distance from the rim, the float64 bits of
+// the profile weight and of the elevation the rim leaves, the rim flag, and the
+// band and terrain the forced or depressed elevation classifies to.
+type goldenRimRow struct {
+	q, r      int64
+	distance  int64
+	profile   uint64
+	elevation uint64
+	rim       bool
+	band      Elevation
+	terrain   Terrain
+}
+
+// goldenRimValues walks in from one corner and then leaves the axis: the
+// outermost ring, the middle of the closed band, the last closed ring and the
+// first falloff ring — which must be the same elevation, because that join is
+// where a step would be — the middle of the falloff, the last depressed ring,
+// the first untouched tile, and three tiles at one distance on three sides.
+var goldenRimValues = []goldenRimRow{
+	{32767, 0, 0, 0x0000000000000000, 0xbff0000000000000, true, ElevationDeepWater, TerrainDeepOcean},
+	{32750, 0, 17, 0x0000000000000000, 0xbff0000000000000, true, ElevationDeepWater, TerrainDeepOcean},
+	{32744, 0, 23, 0x0000000000000000, 0xbff0000000000000, true, ElevationDeepWater, TerrainDeepOcean},
+	{32743, 0, 24, 0x0000000000000000, 0xbff0000000000000, false, ElevationDeepWater, TerrainDeepOcean},
+	{32700, 0, 67, 0x3fdb04a12f684bda, 0xbfdd7b6c61667902, false, ElevationDeepWater, TerrainDeepOcean},
+	{32648, 0, 119, 0x3feffd5a12f684bd, 0x3fe3e8c5f805bd20, false, ElevationHighland, TerrainHills},
+	{32647, 0, 120, 0x3ff0000000000000, 0x3fe5d30e0b036156, false, ElevationHighland, TerrainHills},
+	{16384, -32767, 0, 0x0000000000000000, 0xbff0000000000000, true, ElevationDeepWater, TerrainDeepOcean},
+	{-16000, -16700, 67, 0x3fdb04a12f684bda, 0xbfd3b9d78efe4cdc, false, ElevationDeepWater, TerrainOcean},
+	{0, 32700, 67, 0x3fdb04a12f684bda, 0xbfdda14551648822, false, ElevationDeepWater, TerrainDeepOcean},
+}
+
+func TestGoldenRim(t *testing.T) {
+	g := NewDefault(goldenSeed)
+	rc := g.Config().Rim
+	for _, row := range goldenRimValues {
+		c := NewCoord(row.q, row.r)
+
+		// The distance is recorded so that the rest of the row can be read, and
+		// it is checked against the formula of DESIGN.md 15.1 rather than
+		// trusted: a row whose distance had drifted would be a row pinning the
+		// wrong part of the profile.
+		if got := c.RimDistance(); got != row.distance {
+			t.Errorf("RimDistance at (%d, %d) = %d, want %d", row.q, row.r, got, row.distance)
+			continue
+		}
+
+		s := g.Sample(c)
+		tile := g.Tile(c)
+		for _, f := range []struct {
+			name string
+			got  uint64
+			want uint64
+		}{
+			{"rim profile", math.Float64bits(s.RimProfile), row.profile},
+			{"elevation", math.Float64bits(tile.ElevationValue), row.elevation},
+		} {
+			if f.got != f.want {
+				t.Errorf("%s at (%d, %d), %d hexes from the rim, = %#016x (%v), want %#016x (%v)",
+					f.name, row.q, row.r, row.distance, f.got, math.Float64frombits(f.got),
+					f.want, math.Float64frombits(f.want))
+			}
+		}
+
+		if tile.Rim != row.rim {
+			t.Errorf("Rim at (%d, %d), %d hexes from the rim, = %v, want %v",
+				row.q, row.r, row.distance, tile.Rim, row.rim)
+		}
+		if tile.Elevation != row.band {
+			t.Errorf("band at (%d, %d) = %v, want %v", row.q, row.r, tile.Elevation, row.band)
+		}
+		if tile.Terrain != row.terrain {
+			t.Errorf("terrain at (%d, %d) = %v, want %v", row.q, row.r, tile.Terrain, row.terrain)
+		}
+
+		// What the table is here to say about the closed band, said again
+		// against the configuration rather than against a recorded number: a
+		// forced tile is the floor exactly, and the row above is what that
+		// floor's bits are.
+		if row.rim && tile.ElevationValue != rc.FloorElevation {
+			t.Errorf("the forced tile at (%d, %d) is at %v, want the floor %v",
+				row.q, row.r, tile.ElevationValue, rc.FloorElevation)
 		}
 	}
 }

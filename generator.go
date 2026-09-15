@@ -210,8 +210,20 @@ type Sample struct {
 	// a field terrain reads rather than a value a tile carries.
 	Volcanic float64
 
-	// RimDistance is hexes from the outer edge of the map. See DESIGN.md 15.1.
+	// RimDistance is hexes from the outer edge of the map: 0 on the outermost
+	// ring, positive inside. See DESIGN.md 15.1.
 	RimDistance int64
+
+	// Rim reports that the coordinate is inside the closed band, and RimProfile
+	// is what the generated world is worth here: 0 inside that band, rising
+	// smoothly across the falloff, and exactly 1 everywhere inside both.
+	//
+	// The profile is reported beside the elevation deliberately. It is the one
+	// term of the composite that is a function of the coordinate rather than of
+	// a field, so a tile whose elevation looks wrong near the edge of the map
+	// has this to be read against rather than inferred from a picture.
+	Rim        bool
+	RimProfile float64
 }
 
 // Sample returns the diagnostic decomposition of one coordinate.
@@ -246,6 +258,8 @@ func (g *Generator) Sample(c Coord) Sample {
 		Climate:         g.cfg.Climate.classify(climate),
 		BasinInfluence:  basin.basin,
 		Volcanic:        g.volcanicAt(parts.pos, parts.region),
-		RimDistance:     c.RimDistance(),
+		RimDistance:     parts.rimDistance,
+		Rim:             parts.rim,
+		RimProfile:      g.cfg.Rim.profile(parts.rimDistance),
 	}
 }

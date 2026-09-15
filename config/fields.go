@@ -164,6 +164,10 @@ func buildFieldTable() []Field {
 			Doc: "band inside the closed one, over which elevation is driven down to the forced value",
 		},
 		{
+			Key: "rim_floor_elevation", Path: "Rim.FloorElevation", Group: "rim", Kind: ValueScalar,
+			Doc: "the forced elevation the closed band is pinned at and the falloff blends toward, in [-1, +1]; below sea level for a deep-ocean rim and above it for an icefield",
+		},
+		{
 			Key: "rim_kind", Path: "Rim.Kind", Group: "rim", Kind: ValueChoice,
 			Doc: "what the closed band is made of; an ice rim reads as a polar cap, which is a promise about latitude the climate model does not make",
 			Choices: []Choice{

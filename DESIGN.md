@@ -1317,6 +1317,10 @@ type RimConfig struct {
     // classified from the depressed elevation.
     FalloffHexes uint32
 
+    // FloorElevation is the forced value: what the closed band is pinned at
+    // and what the falloff blends toward, on the elevation scalar's own scale.
+    FloorElevation float64
+
     // Kind is what the closed band is made of.
     Kind RimKind
 }
@@ -1338,8 +1342,13 @@ the depressed elevation by the ordinary rules, so a cold falloff band produces
 tundra and then ice on its own.
 
 Inside `ClosedHexes` the tile is forced: `Rim` is true, elevation is pinned at
-the configured floor, and terrain is `TerrainDeepOcean` or `TerrainGlacialIce`
-according to `Kind`. Heat and moisture are still generated and still reported,
+`FloorElevation`, and terrain is `TerrainDeepOcean` or `TerrainGlacialIce`
+according to `Kind`. The floor is configuration rather than a value derived from
+`Kind`, and the pairing is the configuration's to get right: a deep-ocean rim
+wants a floor well below sea level and an icefield wants one above it, which is
+the difference between a shelving coast and a rising one. Nothing couples them,
+because an ice shelf over water is an ordinary thing to ask for and a rule
+forbidding it would be inventing geography. Heat and moisture are still generated and still reported,
 because a forced tile that reported a fabricated climate would corrupt every
 distribution measurement that includes it.
 
@@ -1771,14 +1780,14 @@ Rules:
 - The fingerprint lives in package `config`, which is the only package that
   imports a CBOR library.
 
-**The defaults are settled by this, not by intention.** Phase 7's remaining
-tuning task is to fix the defaults an algorithm version ships with, and a
+**The defaults are settled by this, not by intention.** Fixing the defaults an
+algorithm version ships with is the last of phase 7's tuning work, and a
 fingerprint over the complete effective configuration is what fixes them:
 `config/fingerprint_test.go` carries the fingerprint of the default `Config` as a
 written-down constant, so moving any default — a wavelength, a weight, a
-threshold, an octave count, a rim width — fails that test on the spot. Updating
-the constant is the compatibility decision, and it belongs in a commit message
-alongside the `AlgorithmVersion` bump that goes with it.
+threshold, an octave count, a rim width, the rim's forced floor — fails that test
+on the spot. Updating the constant is the compatibility decision, and it belongs
+in a commit message alongside the `AlgorithmVersion` bump that goes with it.
 
 The CBOR library's float encoding is worth knowing about: canonical mode writes each float in the shortest form that represents it exactly, so the encoding is a dependency's policy rather than this module's. That is still binary and still exact — the rule that a `float64` is hashed as its bits is kept — and the written constant is the tripwire if a release ever changes the policy.
 
@@ -3924,8 +3933,8 @@ stride within the bound there is nothing to fix.
 
 ### D.11 What the defaults were tuned to
 
-Phase 7 settles the defaults by writing down a fingerprint. These are what phase
-4 left them at, and the numbers are recorded because the next person to move one
+Phase 7 settled the defaults by writing the fingerprint down. These are what
+phase 4 left them at and what that constant fixed, and the numbers are recorded because the next person to move one
 should know what moving it was measured against. Over 20,000 coordinates spread
 across the whole map, at four seeds, under the shipped defaults:
 
@@ -4158,7 +4167,8 @@ down, since each could have gone another way:
   ordinary places.
 
 **The rim rule is written and nothing sets its input.** The order is what this
-phase settles; the profile, the flag, and the forced band are phase 7's.
+phase settles; the profile, the flag, and the forced band are phase 7's, and
+appendix D.16 is where they landed.
 
 **The `climate` layer costs one evaluation a tile, which is what settled a
 disagreement inside the body.** Sections 29, 29.1, and 31 costed it at seven
@@ -4263,3 +4273,130 @@ every terrain reachable, none swallowing the world — which is a test of the
 thresholds rather than of the tuning.
 
 *Phase 6.*
+
+### D.16 The rim profile, written out
+
+Section 15.1 gives the rim as two widths, a kind, and a forced floor, and says
+the falloff is "a smoothstep in `RimDistance`". It does not say which ring the
+closed band ends on, which direction the weight runs, or what happens to a tile
+the band does not reach. This is what phase 7 settled.
+
+**The profile is a weight on the generated world**, not a displacement of it:
+
+```text
+closed  = ClosedHexes
+inner   = ClosedHexes + FalloffHexes
+d       = RimDistance
+
+profile(d) = 1                                      d >= inner
+           = 0                                      d <  closed
+           = smoothstep((d - closed) / FalloffHexes) otherwise
+
+elevation  = elevation                              d >= inner
+           = FloorElevation                         d <  closed
+           = FloorElevation + profile(d) * (elevation - FloorElevation)
+```
+
+Five things about that shape, and the first is the one with a test attached:
+
+- **A tile the band does not reach returns the composite unchanged, not scaled
+  by a weight of one.** `floor + 1*(e - floor)` is not `e` in floating point, so
+  an arithmetically transparent rim would move every tile in the world by an ulp
+  — invisible in a picture, failing no bound, and invalidating every recorded
+  value in the module. The early return is what makes `ClosedHexes = 0,
+  FalloffHexes = 0` reproduce the unrimmed world *bit for bit*, which is section
+  30.14's last assertion and the thing that lets the rim coexist with section
+  30.10 and with the goldens.
+- **The closed band is `d < ClosedHexes`**, so a count of `24` closes the
+  outermost twenty-four rings and a count of `0` closes nothing. Whether the
+  comparison is `<` or `<=` is one character and one ring of the map.
+- **The weight runs zero at the rim to one inside**, which puts `profile(closed)`
+  at exactly zero — the first depressed ring is the floor, which is what the
+  forced ring outside it holds. That is the outer join with no step in it, and it
+  comes out of the arithmetic rather than being arranged.
+- **The rim is applied to the finished scalar**, after the sea-level rescale
+  rather than inside the composite. The floor is expressed on the scalar's own
+  scale, where `-1` is deep ocean at every `SeaLevel`, so what the band is made
+  of does not move when the land fraction is tuned.
+- **Nothing else about the falloff is special.** Its terrain is classified from
+  the depressed elevation by the ordinary rules, which is why a cold falloff
+  produces tundra and then ice on its own, and its heat and moisture are the
+  generated values — the climate composite reads the depressed elevation the
+  same way it reads any other.
+
+The flag is `d < ClosedHexes` and nothing else, and `Generator.IsRim` answers it
+without evaluating a field. That locality is the contrast section 17.1 draws: rim
+membership is a function of the tile alone, the forced elevation is a constant
+rather than a consensus, and the boundary is a ring of constant hex distance
+rather than a level line.
+
+**The golden tables are recorded with the rim switched off**, and the reason is
+this appendix entry's own first bullet. Eight of the twenty-four golden
+coordinates are the rim's corners and edges, chosen because the far side of the
+coordinate domain is where a normalizer or an embedding goes wrong; under the
+shipped rim all eight are forced, so every one of those rows would read as the
+floor and would move again the next time somebody widened the band by a hex. A
+zero rim keeps them as statements about the fields, at no cost, because a zero
+rim is the shipped world bit for bit everywhere the band does not reach. The
+shipped band's own arithmetic is a sixth golden table beside them.
+
+*Phase 7.*
+
+### D.17 What the rim defaults were tuned to
+
+`ClosedHexes = 24`, `FalloffHexes = 96`, `FloorElevation = -1`,
+`Kind = RimDeepOcean`. Measured at the shipped radius, over four seeds:
+
+| | |
+|---|---:|
+| closed band, tiles | 4,716,792 |
+| closed band, of the world | 0.00146 |
+| whole band, tiles | 23,549,400 |
+| whole band, of the world | 0.00731 |
+| days to walk the closed band, at section 7.2's 24 miles | 6 |
+| days to walk the falloff | 24 |
+| land inside the band, rim off | 0.285 |
+| land inside the band, rim on | 0.065 |
+| last land ring of a rim approach, median of 120 | 101 |
+| land fraction of the world, rim off / rim on | 0.316 / 0.314 |
+
+What those rows were chosen for:
+
+- **The band is seven thousandths of the world and six days of walking.** Both
+  numbers matter and they pull in opposite directions: the band has to be wide
+  enough that a traveller sees the ground running out rather than stepping off a
+  cliff, and narrow enough that it is a place at the edge of the world rather
+  than a feature of the world. Neither width scales with the radius, because the
+  rim is somewhere a traveller arrives rather than a fraction of a map.
+- **The shelf is about two thirds water.** Of the rim approaches that start on
+  land at the inner edge of the falloff, the median walk leaves land nineteen
+  hexes in — five days — and then crosses about eighty hexes of shelving water
+  before the forced band, twenty days of coast, sea, and then deep ocean in that
+  order, classified by the ordinary rules from the depressed elevation. That is the
+  exit condition of section 32's phase 7 as a number: *a radial walk to the rim
+  shows a shelving coast and then forced terrain*.
+- **The floor is `-1` because it is the one value that cannot raise a tile.**
+  The elevation scalar is clamped to `[-1, +1]`, so blending toward its bottom
+  can only lower the composite: the world outside the band is the world and the
+  band is its floor, with no configuration of the noise able to make the rim a
+  wall. It is also comfortably below `Terrain.DeepOceanDepth`, so the shelf has
+  become deep ocean well before the closed band forces it — the forcing is
+  invisible rather than a change of color at a ring.
+- **The band moves the world's land fraction by about two thousandths**, from
+  0.316 to 0.314, which is the answer to the only question the rim raises about
+  appendix D.15's table: it does not invalidate it. Only the outer seven
+  thousandths of the world can change at all, and most of that was water
+  already.
+- **Deep ocean rather than ice**, for the reason section 15.1 gives at length: a
+  polar cap is a promise about latitude that section 16 does not make. An ice rim
+  is `Kind = RimPolarIce` with a floor above sea level, and both halves have to
+  move — an icefield pinned at `-1` is a glacier at the bottom of the sea.
+
+One thing the rim is *not* tuned by, and it is worth saying because it looks like
+it should be: the whole-world grid image. At a stride coarse enough to draw
+3.2 billion tiles the band is about one pixel, so "is the rim right everywhere"
+is answered by the `rim` layer in a window on a corner and by the uniformity
+tests, not by looking at the world. What the whole-world image answers is whether
+the continents cover the world plausibly.
+
+*Phase 7.*

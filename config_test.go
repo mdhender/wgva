@@ -107,6 +107,10 @@ func TestConfigValidation(t *testing.T) {
 			func(c *Config) { c.Rim.Kind = RimKind(7) }},
 		{"rim wider than the map", "Rim.ClosedHexes+Rim.FalloffHexes", ErrOutOfRange,
 			func(c *Config) { c.Rim.ClosedHexes = uint32(WorldRadius) }},
+		{"rim floor off the scale", "Rim.FloorElevation", ErrOutOfRange,
+			func(c *Config) { c.Rim.FloorElevation = -1.5 }},
+		{"rim floor not finite", "Rim.FloorElevation", ErrNotFinite,
+			func(c *Config) { c.Rim.FloorElevation = math.Inf(-1) }},
 
 		// The elevation composite. Every weight is positive, the amounts are
 		// normalized, and the band ladder ascends from below sea level.
@@ -236,7 +240,15 @@ func TestValidConfigurations(t *testing.T) {
 		"no climate contrast": func(c *Config) {
 			c.Climate.HeatContrastPasses, c.Climate.MoistureContrastPasses = 0, 0
 		},
-		"polar ice rim": func(c *Config) { c.Rim.Kind = RimPolarIce },
+		// An ice rim wants a floor above sea level, and nothing couples the two:
+		// the pairing is the configuration's to get right, and an ice shelf over
+		// water is an ordinary thing to ask for.
+		"polar ice rim": func(c *Config) { c.Rim.Kind, c.Rim.FloorElevation = RimPolarIce, 0.6 },
+		// The floor is a value rather than a threshold, so both ends of the
+		// scale are legitimate settings: -1 is the bottom of the ocean and +1 is
+		// an icefield at the top of the range.
+		"rim floor at the top of the scale": func(c *Config) { c.Rim.FloorElevation = 1 },
+		"rim floor at sea level":            func(c *Config) { c.Rim.FloorElevation = 0 },
 		// DESIGN.md 15.1: the unrimmed world must stay a valid configuration,
 		// because it is how the wrap tests see the seam they assert on.
 		"no rim": func(c *Config) { c.Rim.ClosedHexes, c.Rim.FalloffHexes = 0, 0 },

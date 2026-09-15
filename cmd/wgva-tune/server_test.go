@@ -202,7 +202,7 @@ func TestRefusalsAre400(t *testing.T) {
 	cases := map[string]string{
 		"a coordinate off the map":          seedPath() + "/map.png?q=99999",
 		"a coordinate that is not a number": seedPath() + "/map.png?q=origin",
-		"a layer that does not exist":       seedPath() + "/map.png?layer=rim",
+		"a layer that does not exist":       seedPath() + "/map.png?layer=rivers",
 		"a seed that is not a number":       "/seed/not-a-seed",
 		"a window over budget":              seedPath() + "/grid.png?cols=1001&rows=1001&scale=1",
 	}

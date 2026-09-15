@@ -351,7 +351,8 @@ func TestReliefMatchesAnIndependentComputation(t *testing.T) {
 // notice the difference.
 //
 // DESIGN.md 18's other case, relief inside the rim, is the same statement about
-// the same arithmetic and arrives with the rim in phase 7.
+// the same arithmetic: a forced constant has no slope, which is why the rim's
+// own suite asserts the band is flat rather than repeating this comparison.
 func TestReliefFollowsTheGroundItMeasures(t *testing.T) {
 	coords := probeCoords(400, 17)
 

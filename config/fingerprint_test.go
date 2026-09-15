@@ -11,20 +11,62 @@ import (
 	"github.com/mdhender/wgva/config"
 )
 
-// The written-down fingerprint of the default configuration belongs here, and it
-// is not here yet.
+// DefaultFingerprint is the fingerprint of this binary's default configuration,
+// and writing it down here is what **settles the defaults** algorithm version 6
+// ships with. DESIGN.md 21.2 and phase 7 of section 32.
 //
-// DESIGN.md 21.2 makes that constant the thing that *settles* the defaults an
-// algorithm version ships with: from the moment it exists, moving any default —
-// a wavelength, a weight, a threshold, an octave count, a rim width — fails a
-// test on the spot, and updating it is the compatibility decision. Writing it
-// down now would settle defaults that phase 7 exists to choose, and every tuning
-// session between here and there would begin by updating a constant that is
-// supposed to mean something. Phase 7 is where it lands; DESIGN.md section 32.
+// It is a specific act rather than a feeling. From this line onward, moving any
+// default — a wavelength, a weight, a threshold, an octave count, a rim width,
+// the rim's forced floor — fails TestDefaultConfigurationIsSettled on the spot.
+// **Updating this constant is the compatibility decision**, and it belongs in a
+// commit message beside the AlgorithmVersion bump that goes with it, saying
+// which default moved and why.
 //
-// What can be asserted now is everything the constant will depend on: that the
-// fingerprint is stable, that it separates configurations that differ, and that
-// nothing about how a value is spelled reaches it.
+// Three things it is worth knowing this constant does *not* say. It is not a
+// checksum of the generator's code: DESIGN.md 21.2 hashes what was declared, so
+// a build that changes a noise formula without bumping the algorithm version
+// produces a different world under this same number, and what closes that gap is
+// the discipline of section 27 and the build identity in the creation guard of
+// section 29.5. It is not a judgement that these numbers are the right numbers —
+// appendices D.11, D.13, D.15, and D.17 are what they were tuned to and any of
+// them may still be wrong. And it is not a promise about the CBOR library: the
+// canonical encoder writes each float in the shortest form that represents it
+// exactly, which is a dependency's policy, and this constant is the tripwire if a
+// release ever changes it.
+//
+// Recorded under AlgorithmVersion 6 at world radius 32767.
+const DefaultFingerprint = "f32d2b728906de9c7f0921b2ca652b778551abaa390a5741da62371bcfd3430b"
+
+// TestDefaultConfigurationIsSettled is the test the constant above exists for.
+//
+// A failure here is never a bug in this test. It says that a default moved, and
+// the two honest responses are to put it back or to write the new number down
+// together with the reason and the version bump.
+func TestDefaultConfigurationIsSettled(t *testing.T) {
+	got := config.DefaultDigest()
+	if got.String() != DefaultFingerprint {
+		t.Errorf("the default configuration fingerprints as\n\t%s\nand the settled constant is\n\t%s\n"+
+			"A default moved. Put it back, or write the new fingerprint down in this file together with the "+
+			"AlgorithmVersion bump and one line on which default moved and why.",
+			got, DefaultFingerprint)
+	}
+
+	// The two inputs beside the configuration, written out for the same reason
+	// the digest is: this constant is the fingerprint of *these* defaults under
+	// *this* version at *this* radius, and a reader who found it failing needs to
+	// know which of the three moved.
+	if wgva.AlgorithmVersion != 6 {
+		t.Errorf("the algorithm version is %d and the fingerprint above was recorded under 6",
+			wgva.AlgorithmVersion)
+	}
+	if wgva.WorldRadius != 32767 {
+		t.Errorf("the world radius is %d and the fingerprint above was recorded at 32767", wgva.WorldRadius)
+	}
+}
+
+// Everything below is what the constant depends on: that the fingerprint is
+// stable, that it separates configurations that differ, and that nothing about
+// how a value is spelled reaches it.
 
 // TestFingerprintIsStable is the property the whole scheme rests on.
 func TestFingerprintIsStable(t *testing.T) {

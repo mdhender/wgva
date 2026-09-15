@@ -77,4 +77,13 @@ const WorldRadius int64 = 32767
 //	   the scale, region, elevation, and climate golden tables all stand
 //	   unchanged. Inland water is declared and is emitted nowhere;
 //	   DESIGN.md 17.1.
-const AlgorithmVersion uint32 = 5
+//	6  The rim. The profile of DESIGN.md 15.1 — the closed band, the smoothstep
+//	   falloff inside it, the forced elevation floor, and the Rim flag — applied
+//	   to the finished elevation scalar, and the rim layer that draws it.
+//	   Config.Rim gained FloorElevation, so no version 5 configuration can be
+//	   read. **This one moves generated values**, and only inside the band: the
+//	   outermost 120 rings of the default world are forced or depressed, and
+//	   every tile inside them is the tile version 5 produced, bit for bit. That
+//	   is RimConfig.apply returning the composite unchanged rather than scaled
+//	   by a weight of one, and it is what lets the golden tables stand.
+const AlgorithmVersion uint32 = 6

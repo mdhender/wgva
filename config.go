@@ -465,10 +465,12 @@ func (c Config) ladderFor(s Scale) (LadderConfig, uint64) {
 
 // DefaultConfig returns the configuration an algorithm version ships with.
 //
-// These are starting values drawn from the scale table in DESIGN.md 10, not
-// settled ones. Phase 7 fixes them, and from then on the written-down constant
-// in config/fingerprint_test.go is what settles them: moving any default fails
-// that test, and updating the constant is the compatibility decision.
+// **These are settled.** The written-down fingerprint constant in
+// config/fingerprint_test.go is what settles them, so moving any default fails
+// that test, and updating the constant is the compatibility decision — it
+// belongs in a commit message beside the AlgorithmVersion bump that goes with
+// it. Appendices D.11, D.13, D.15, and D.17 record what each group was tuned
+// to and what moving one costs.
 func DefaultConfig() Config {
 	return Config{
 		// About a third of the world is land, which is the fraction DESIGN.md 4.2
@@ -615,9 +617,25 @@ func DefaultConfig() Config {
 		ChunkSizeHexes:       32,
 
 		Rim: RimConfig{
+			// Twenty-four rings of forced water with ninety-six of shelf
+			// inside them: six days' walk of closed band at DESIGN.md 7.2's
+			// twenty-four miles a day, reached across twenty-four days of
+			// ground that is visibly running out. Both are hexes and neither
+			// scales with the radius — the rim is a place a traveller arrives
+			// at, not a fraction of the map. Appendix D.17 is what they were
+			// tuned to.
 			ClosedHexes:  24,
 			FalloffHexes: 96,
-			Kind:         RimDeepOcean,
+
+			// The bottom of the scale, which is the one value that cannot
+			// raise a tile: blending toward it can only lower the composite, so
+			// the world outside the band is the world and the band is its
+			// floor. It is also comfortably below Terrain.DeepOceanDepth, so
+			// the shelf has become deep ocean well before the closed band
+			// forces it.
+			FloorElevation: -1,
+
+			Kind: RimDeepOcean,
 		},
 	}
 }
@@ -1137,6 +1155,9 @@ func (l LadderConfig) validate(prefix string) error {
 }
 
 func (rc RimConfig) validate() error {
+	if err := checkSignedUnit("Rim.FloorElevation", rc.FloorElevation); err != nil {
+		return err
+	}
 	if !rc.Kind.Valid() {
 		return &ConfigError{
 			Field: "Rim.Kind", Value: float64(rc.Kind),
@@ -1151,6 +1172,23 @@ func (rc RimConfig) validate() error {
 			Field: "Rim.ClosedHexes+Rim.FalloffHexes", Value: float64(total),
 			Lo: 0, Hi: float64(WorldRadius), Err: ErrOutOfRange,
 		}
+	}
+	return nil
+}
+
+// checkSignedUnit rejects a value outside the closed interval [-1, +1].
+//
+// It is closed at both ends where checkSignedThreshold is open, and the
+// difference is what the number is for: a threshold at an end is a rule nothing
+// can reach, while a value at an end is an ordinary setting. The rim's forced
+// elevation is the case — -1 is the bottom of the scale and is exactly what a
+// deep-ocean rim is pinned at.
+func checkSignedUnit(field string, v float64) error {
+	if !isFinite(v) {
+		return &ConfigError{Field: field, Value: v, Err: ErrNotFinite}
+	}
+	if v < -1 || v > 1 {
+		return &ConfigError{Field: field, Value: v, Lo: -1, Hi: 1, Err: ErrOutOfRange}
 	}
 	return nil
 }

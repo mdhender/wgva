@@ -389,22 +389,41 @@ func TestTileReportsTheClimatesMoistureNotTheWetness(t *testing.T) {
 	}
 }
 
-// TestRimFlagIsFalseUntilPhaseSeven pins the state this phase leaves the rim
-// in, so that the phase that implements the profile has something to change.
+// TestRimFlagComesFromTheConfiguredBand is the one thing about the rim that
+// belongs in this file rather than in rim_test.go: that the flag and the forced
+// terrain reach a Tile from the configuration at all.
 //
-// DESIGN.md 32's phase 7 is what sets the flag and forces the band. The
-// classifier's rim rule is written and tested because the *order* is what this
-// phase settles; nothing sets its input yet.
-func TestRimFlagIsFalseUntilPhaseSeven(t *testing.T) {
+// Everything else about the profile — the distance rule, the falloff, the
+// uniformity, and the bit-for-bit identity of a zero rim — is the suite of
+// DESIGN.md 30.14 in rim_test.go.
+func TestRimFlagComesFromTheConfiguredBand(t *testing.T) {
 	g := NewDefault(probeSeed)
+	closed := int64(g.Config().Rim.ClosedHexes)
+	if closed == 0 {
+		t.Fatal("the defaults close no band, so this test asserts nothing")
+	}
+
 	for _, c := range []Coord{
 		NewCoord(0, 0),
+		NewCoord(WorldRadius-closed, 0),
+	} {
+		if g.Tile(c).Rim {
+			t.Errorf("Tile.Rim is set at (%d, %d), %d hexes from the rim", c.Q(), c.R(), c.RimDistance())
+		}
+	}
+	for _, c := range []Coord{
 		NewCoord(WorldRadius, 0),
 		NewCoord(0, -WorldRadius),
 		NewCoord(WorldRadius, -WorldRadius),
+		NewCoord(WorldRadius-closed+1, 0),
 	} {
-		if g.Tile(c).Rim {
-			t.Errorf("Tile.Rim is set at (%d, %d), which is phase 7's to do", c.Q(), c.R())
+		tile := g.Tile(c)
+		if !tile.Rim {
+			t.Errorf("Tile.Rim is clear at (%d, %d), %d hexes from the rim", c.Q(), c.R(), c.RimDistance())
+		}
+		if tile.Terrain != TerrainDeepOcean {
+			t.Errorf("the forced tile at (%d, %d) is %v, want the deep ocean the default rim is made of",
+				c.Q(), c.R(), tile.Terrain)
 		}
 	}
 }
