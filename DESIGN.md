@@ -4160,14 +4160,31 @@ down, since each could have gone another way:
 **The rim rule is written and nothing sets its input.** The order is what this
 phase settles; the profile, the flag, and the forced band are phase 7's.
 
-**One departure from section 29 is recorded here rather than fixed.** That
-section costs the `climate` layer at seven evaluations a tile, on the grounds
-that it reads the six neighboring elevations. It does not: the climate composite
-reads the elevation scalar at its own tile and nothing around it, so the layer
-costs one. Only `relief` and `terrain` read neighbors. Costing climate at seven
-would over-charge every budget by a factor of seven for work nobody does, and a
-budget that refuses affordable windows is a budget people raise until it stops
-meaning anything.
+**The `climate` layer costs one evaluation a tile and not seven, and the body
+says both.** Three places cost it at seven — sections 29, 29.1, and 31 — each on
+the grounds that it reads the six neighboring elevations. Section 31.2 says the
+opposite in the course of decomposing a tile: *relief is seven elevation
+evaluations and nothing else; a whole `Tile` is those same seven plus climate,
+basin influence, volcanic tendency, and terrain.* That sentence puts climate as
+work layered on the seven rather than as seven of its own, and it is the one the
+code agrees with.
+
+So this is not the implementation departing from the body. It is the body
+disagreeing with itself, and the implementation landing on the side that is
+right about the model: nothing in section 16 gives either climate axis a term
+that reads a neighbor, so the stated *reason* for the seven is false and not
+merely its arithmetic. Temperature and moisture are both local, and the rain
+shadow D.13 mentions is a statement about the moisture field's wavelength rather
+than about sampling upwind. Only `relief` and `terrain` read the six neighbors.
+
+Costing climate at seven would over-charge every budget by a factor of seven for
+work nobody does, and a budget that refuses affordable windows is a budget people
+raise until it stops meaning anything. The three sentences that say seven should
+lose climate from their lists; this entry stands until they do, so that a reader
+who finds one of them has somewhere to be sent. **If a later version does give
+climate a term that reads its neighbors, the seven becomes right and this entry
+is what has to go** — which is the ordinary case of an appendix entry describing
+code that has since moved.
 
 *Phase 6.*
 
